@@ -1,5 +1,7 @@
 import asyncio
 import re
+import shutil
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -7,12 +9,17 @@ from queue_manager import QueueManager
 
 MAX_CONCURRENT_DOWNLOADS = 3
 REFERER_BLOCKED_MESSAGE = "Blocked — this video may require the course site as referer"
+PROGRESS_THROTTLE_SECONDS = 0.25
 
 
 def sanitize_filename(name: str) -> str:
     cleaned = re.sub(r'[\\/:*?"<>|]', "_", name)
     cleaned = cleaned.strip().strip(".")
     return cleaned or "untitled"
+
+
+def check_ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
 
 
 def is_referer_blocked_error(exc: Exception) -> bool:
@@ -47,7 +54,7 @@ def run_download(
     verified manually against live Vimeo links (see design spec Testing section)."""
     import yt_dlp
 
-    output_template = str(Path(output_folder) / "%(title)s.%(ext)s")
+    output_template = str(Path(output_folder) / "%(title)s [%(id)s].%(ext)s")
     opts = build_ydl_opts(output_template, referer, progress_hook)
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=True)
@@ -71,10 +78,16 @@ class DownloadOrchestrator:
             self.queue_manager.set_status(entry_id, "downloading")
             loop = asyncio.get_running_loop()
             url = self.queue_manager.get(entry_id).url
+            last_progress_time = 0.0
 
             def progress_hook(d: dict) -> None:
+                nonlocal last_progress_time
                 if d.get("status") != "downloading":
                     return
+                now = time.monotonic()
+                if now - last_progress_time < PROGRESS_THROTTLE_SECONDS:
+                    return
+                last_progress_time = now
                 downloaded = d.get("downloaded_bytes")
                 total = d.get("total_bytes") or d.get("total_bytes_estimate")
                 percent = (
