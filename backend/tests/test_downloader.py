@@ -87,5 +87,5 @@ def test_download_all_never_exceeds_max_concurrency():
     orchestrator = DownloadOrchestrator(manager, max_concurrent=2, download_fn=slow_download)
     asyncio.run(orchestrator.download_all([e.id for e in entries], "/tmp/out"))
 
-    assert counters["peak"] <= 2
+    assert counters["peak"] == 2
     assert all(manager.get(e.id).status == "done" for e in entries)
