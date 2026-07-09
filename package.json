@@ -1,0 +1,12 @@
+{
+  "name": "vimeo-course-downloader",
+  "version": "1.0.0",
+  "description": "Paste Vimeo links, download them in parallel with live progress bars.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}
