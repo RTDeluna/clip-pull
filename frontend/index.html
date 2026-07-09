@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Vimeo Course Downloader</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app__header">
+      <h1 class="app__title">VIMEO<span class="app__title-accent">.PULL</span></h1>
+      <p class="app__subtitle">Paste links. Pick a folder. Walk away.</p>
+    </header>
+
+    <section class="panel">
+      <label class="field-label" for="urls">Vimeo links (one per line)</label>
+      <textarea
+        id="urls"
+        class="urls-input"
+        rows="6"
+        placeholder="https://vimeo.com/123456789&#10;https://vimeo.com/987654321?h=abc123"
+      ></textarea>
+      <div id="invalid-lines" class="invalid-lines" hidden></div>
+
+      <div class="field-row">
+        <div class="field-group field-group--grow">
+          <label class="field-label" for="output-folder">Save to</label>
+          <div class="folder-picker">
+            <input
+              id="output-folder"
+              class="folder-input"
+              type="text"
+              placeholder="Choose a folder…"
+              readonly
+            />
+            <button id="browse-btn" class="btn btn--ghost" type="button">Browse…</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field-group field-group--grow">
+          <label class="field-label" for="referer">Referer domain (optional)</label>
+          <input
+            id="referer"
+            class="text-input"
+            type="text"
+            placeholder="e.g. https://your-course-site.com"
+          />
+        </div>
+      </div>
+
+      <button id="start-btn" class="btn btn--primary" type="button">Start Download</button>
+    </section>
+
+    <section class="panel">
+      <div class="queue-header">
+        <h2 class="queue-title">Queue</h2>
+        <span id="queue-summary" class="queue-summary"></span>
+      </div>
+      <ul id="queue-list" class="queue-list"></ul>
+    </section>
+  </div>
+
+  <script type="module" src="ws-client.js"></script>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>
