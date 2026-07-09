@@ -42,14 +42,24 @@ app = FastAPI()
 connection_manager = ConnectionManager()
 state = AppState()
 
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _track_task(task: asyncio.Task) -> None:
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 def _notify_websocket_clients(entry_dict: dict) -> None:
     try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return  # no running event loop (e.g. called outside a request, such as in tests)
+    _track_task(
         asyncio.create_task(
             connection_manager.broadcast({"type": "update", "entry": entry_dict})
         )
-    except RuntimeError:
-        pass  # no running event loop (e.g. called outside a request, such as in tests)
+    )
 
 
 queue_manager = QueueManager(on_update=_notify_websocket_clients)
@@ -83,11 +93,13 @@ async def post_queue(request: QueueRequest) -> dict:
     state.referer = request.referer
     entries = queue_manager.add_entries(valid_urls)
     if entries:
-        asyncio.create_task(
-            orchestrator.download_all(
-                [entry.id for entry in entries],
-                request.output_folder,
-                request.referer,
+        _track_task(
+            asyncio.create_task(
+                orchestrator.download_all(
+                    [entry.id for entry in entries],
+                    request.output_folder,
+                    request.referer,
+                )
             )
         )
     return {
@@ -100,8 +112,10 @@ async def post_queue(request: QueueRequest) -> dict:
 async def retry_entry(entry_id: str, request: RetryRequest) -> dict:
     queue_manager.reset_for_retry(entry_id)
     referer = request.referer or state.referer
-    asyncio.create_task(
-        orchestrator.download_all([entry_id], state.output_folder, referer)
+    _track_task(
+        asyncio.create_task(
+            orchestrator.download_all([entry_id], state.output_folder, referer)
+        )
     )
     return {"entry": queue_manager.to_dict(entry_id)}
 
