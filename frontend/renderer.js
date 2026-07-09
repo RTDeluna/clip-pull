@@ -92,11 +92,15 @@ function updateSummary() {
 }
 
 async function retryEntry(entryId) {
-  await fetch(`${API_BASE}/queue/${entryId}/retry`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ referer: refererInput.value || null }),
-  });
+  try {
+    await fetch(`${API_BASE}/queue/${entryId}/retry`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ referer: refererInput.value || null }),
+    });
+  } catch (error) {
+    alert("Retry failed: " + error.message);
+  }
 }
 
 browseBtn.addEventListener("click", async () => {
@@ -114,25 +118,31 @@ startBtn.addEventListener("click", async () => {
   startBtn.disabled = true;
   invalidLinesEl.hidden = true;
 
-  const response = await fetch(`${API_BASE}/queue`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      urls_text: urlsInput.value,
-      output_folder: outputFolderInput.value,
-      referer: refererInput.value || null,
-    }),
-  });
-  const body = await response.json();
+  try {
+    const response = await fetch(`${API_BASE}/queue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        urls_text: urlsInput.value,
+        output_folder: outputFolderInput.value,
+        referer: refererInput.value || null,
+      }),
+    });
+    const body = await response.json();
 
-  if (body.invalid_lines && body.invalid_lines.length > 0) {
+    if (body.invalid_lines && body.invalid_lines.length > 0) {
+      invalidLinesEl.hidden = false;
+      invalidLinesEl.textContent = `Skipped invalid lines:\n${body.invalid_lines.join("\n")}`;
+    }
+
+    body.entries.forEach(renderRow);
+    urlsInput.value = "";
+  } catch (error) {
     invalidLinesEl.hidden = false;
-    invalidLinesEl.textContent = `Skipped invalid lines:\n${body.invalid_lines.join("\n")}`;
+    invalidLinesEl.textContent = "Failed to reach the backend: " + error.message;
+  } finally {
+    startBtn.disabled = false;
   }
-
-  body.entries.forEach(renderRow);
-  urlsInput.value = "";
-  startBtn.disabled = false;
 });
 
 connectQueueSocket((event) => {
