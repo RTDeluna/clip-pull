@@ -1,3 +1,5 @@
+import asyncio
+
 import main as main_module
 from fastapi.testclient import TestClient
 
@@ -19,6 +21,11 @@ def test_health_returns_ok():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_cors_headers_present_for_cross_origin_request():
+    response = client.get("/health", headers={"Origin": "http://example.com"})
+    assert response.headers.get("access-control-allow-origin") == "*"
 
 
 def test_post_queue_creates_entries_for_valid_urls():
@@ -57,6 +64,44 @@ def test_get_queue_returns_current_entries():
     response = client.get("/queue")
     urls = [entry["url"] for entry in response.json()["entries"]]
     assert "https://vimeo.com/333" in urls
+
+
+class _RecordingSocket:
+    """Fake WebSocket that records how many send_json calls are in-flight
+    concurrently, so we can prove ConnectionManager.broadcast serializes them."""
+
+    def __init__(self, delay: float = 0.01):
+        self.delay = delay
+        self.received = []
+        self._active = 0
+        self.max_concurrent_sends = 0
+
+    async def send_json(self, message: dict) -> None:
+        self._active += 1
+        self.max_concurrent_sends = max(self.max_concurrent_sends, self._active)
+        await asyncio.sleep(self.delay)
+        self.received.append(message)
+        self._active -= 1
+
+
+def test_connection_manager_broadcast_serializes_concurrent_sends():
+    manager = main_module.ConnectionManager()
+    socket = _RecordingSocket()
+    manager.active.append(socket)
+
+    async def run():
+        await asyncio.gather(
+            manager.broadcast({"n": 1}),
+            manager.broadcast({"n": 2}),
+        )
+
+    asyncio.run(run())
+
+    # Without serialization, two concurrent broadcasts would both be inside
+    # send_json on the same socket at once (max_concurrent_sends == 2), which
+    # Starlette does not support safely. With the lock, sends never overlap.
+    assert socket.max_concurrent_sends == 1
+    assert len(socket.received) == 2
 
 
 def test_retry_entry_resets_status_to_queued():

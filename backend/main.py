@@ -1,10 +1,12 @@
 import asyncio
+import sys
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from downloader import DownloadOrchestrator
+from downloader import DownloadOrchestrator, check_ffmpeg_available
 from queue_manager import QueueManager
 from url_validation import parse_url_list
 
@@ -12,6 +14,7 @@ from url_validation import parse_url_list
 class ConnectionManager:
     def __init__(self):
         self.active: list[WebSocket] = []
+        self._send_lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
@@ -22,14 +25,15 @@ class ConnectionManager:
             self.active.remove(websocket)
 
     async def broadcast(self, message: dict) -> None:
-        stale = []
-        for connection in self.active:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                stale.append(connection)
-        for connection in stale:
-            self.disconnect(connection)
+        async with self._send_lock:
+            stale = []
+            for connection in self.active:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    stale.append(connection)
+            for connection in stale:
+                self.disconnect(connection)
 
 
 class AppState:
@@ -39,6 +43,7 @@ class AppState:
 
 
 app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 connection_manager = ConnectionManager()
 state = AppState()
 
@@ -133,5 +138,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 if __name__ == "__main__":
     import uvicorn
+
+    if not check_ffmpeg_available():
+        print(
+            "WARNING: ffmpeg not found on PATH. High-quality Vimeo downloads "
+            "require ffmpeg to merge video+audio streams; downloads may fail "
+            "or fall back to lower quality without it.",
+            file=sys.stderr,
+        )
 
     uvicorn.run(app, host="127.0.0.1", port=8934)
