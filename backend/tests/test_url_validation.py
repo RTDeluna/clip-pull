@@ -13,6 +13,14 @@ def test_is_vimeo_url_accepts_player_embed_link():
     assert is_vimeo_url("https://player.vimeo.com/video/123456789") is True
 
 
+def test_is_vimeo_url_accepts_path_based_private_link():
+    assert is_vimeo_url("https://vimeo.com/123456789/abc123def") is True
+
+
+def test_is_vimeo_url_accepts_path_based_private_link_with_www():
+    assert is_vimeo_url("https://www.vimeo.com/123456789/abc123def") is True
+
+
 def test_is_vimeo_url_rejects_non_vimeo_link():
     assert is_vimeo_url("https://youtube.com/watch?v=abc123") is False
 

@@ -1,7 +1,7 @@
 import re
 
 VIMEO_URL_PATTERN = re.compile(
-    r"^https?://(www\.)?(player\.)?vimeo\.com/(video/)?\d+(\?.*)?$"
+    r"^https?://(www\.)?(player\.)?vimeo\.com/(video/)?\d+(/[A-Za-z0-9]+)?(\?.*)?$"
 )
 
 
