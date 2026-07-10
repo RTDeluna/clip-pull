@@ -1057,6 +1057,45 @@ input[type="checkbox"] {
   display: block;
 }
 
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease), transform 140ms var(--ease);
+}
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.icon-btn:hover:not(:disabled) {
+  background: var(--glass-bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.icon-btn.is-spinning svg {
+  animation: icon-btn-spin 700ms linear;
+}
+@keyframes icon-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .view[hidden] {
   display: none;
 }
@@ -1380,6 +1419,7 @@ input[type="checkbox"] {
   .toast--leaving,
   .modal-overlay,
   .modal,
+  .icon-btn.is-spinning svg,
   .queue-row--downloading .progress-fill::after {
     animation: none;
   }

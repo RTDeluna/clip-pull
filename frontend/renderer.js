@@ -14,6 +14,7 @@ const courseFolderInput = document.getElementById("course-folder");
 const startBtn = document.getElementById("start-btn");
 const queueList = document.getElementById("queue-list");
 const queueSummary = document.getElementById("queue-summary");
+const queueRefreshBtn = document.getElementById("queue-refresh-btn");
 
 const rows = new Map();
 const summaryCounts = { done: 0, error: 0 };
@@ -274,6 +275,35 @@ function removeRow(entryId) {
   state.el.classList.add("queue-row--leaving");
   state.el.addEventListener("animationend", () => state.el.remove(), { once: true });
 }
+
+// A full resync with the backend's current queue state — unlike the
+// WebSocket's live "update_batch"/"removed" pushes, this also reconciles
+// away any row this client still shows that the backend no longer has
+// (e.g. after a dropped connection), not just apply new updates.
+async function refreshQueue() {
+  const response = await fetch(`${API_BASE}/queue`);
+  if (!response.ok) throw new Error("backend returned an error");
+  const body = await response.json();
+  const freshIds = new Set(body.entries.map((entry) => entry.id));
+  Array.from(rows.keys()).forEach((id) => {
+    if (!freshIds.has(id)) removeRow(id);
+  });
+  body.entries.forEach((entry) => renderRow(entry, { announceCompletion: false }));
+}
+
+queueRefreshBtn.addEventListener("click", async () => {
+  queueRefreshBtn.disabled = true;
+  queueRefreshBtn.classList.add("is-spinning");
+  try {
+    await refreshQueue();
+    showToast("Queue refreshed", "success");
+  } catch (error) {
+    showToast("Failed to refresh the queue: " + error.message, "error");
+  } finally {
+    queueRefreshBtn.classList.remove("is-spinning");
+    queueRefreshBtn.disabled = false;
+  }
+});
 
 function isSupportedUrl(str) {
   try {

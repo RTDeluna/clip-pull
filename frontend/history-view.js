@@ -1,4 +1,5 @@
 import { showToast } from "./toast.js";
+import { connectQueueSocket } from "./ws-client.js";
 
 const BACKEND_PORT = window.api?.backendPort ?? 8934;
 const API_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -8,6 +9,7 @@ const statusFilter = document.getElementById("history-status-filter");
 const historyList = document.getElementById("history-list");
 const historySummary = document.getElementById("history-summary");
 const clearBtn = document.getElementById("history-clear-btn");
+const refreshBtn = document.getElementById("history-refresh-btn");
 
 const LINK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l2-2a5 5 0 0 0-7.07-7.07l-1 1"></path><path d="M14 11a5 5 0 0 0-7.07 0l-2 2a5 5 0 0 0 7.07 7.07l1-1"></path></svg>`;
 const FOLDER_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
@@ -196,7 +198,7 @@ async function loadHistory() {
     if (searchInput.value) params.set("q", searchInput.value);
     if (statusFilter.value) params.set("status", statusFilter.value);
     const response = await fetch(`${API_BASE}/history?${params.toString()}`);
-    if (!response.ok) return;
+    if (!response.ok) return false;
     const body = await response.json();
     historyList.innerHTML = "";
     let lastGroup = null;
@@ -209,8 +211,10 @@ async function loadHistory() {
       historyList.appendChild(renderHistoryRow(entry));
     });
     updateSummaryCount();
+    return true;
   } catch {
     // Backend unreachable or errored — leave the list as-is.
+    return false;
   }
 }
 
@@ -238,6 +242,15 @@ clearBtn.addEventListener("click", async () => {
   }
 });
 
+refreshBtn.addEventListener("click", async () => {
+  refreshBtn.disabled = true;
+  refreshBtn.classList.add("is-spinning");
+  const ok = await loadHistory();
+  showToast(ok ? "History refreshed" : "Failed to refresh history", ok ? "success" : "error");
+  refreshBtn.classList.remove("is-spinning");
+  refreshBtn.disabled = false;
+});
+
 let debounceTimer;
 searchInput.addEventListener("input", () => {
   clearTimeout(debounceTimer);
@@ -246,3 +259,14 @@ searchInput.addEventListener("input", () => {
 statusFilter.addEventListener("change", loadHistory);
 
 loadHistory();
+
+// Every finished download is pushed here the instant it's recorded — the
+// History tab always reflects it live, whether or not it's the active tab.
+let historyPushTimer;
+connectQueueSocket((event) => {
+  if (event.type !== "history_added") return;
+  // Briefly coalesces bursts (e.g. a batch finishing within milliseconds of
+  // each other) into a single refetch instead of one per entry.
+  clearTimeout(historyPushTimer);
+  historyPushTimer = setTimeout(loadHistory, 150);
+});
