@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { spawn } = require("child_process");
+const { spawn, exec } = require("child_process");
 const http = require("http");
 
 const EXTENSION_DIR = path.join(__dirname, "assets", "extension");
@@ -83,9 +83,72 @@ ipcMain.handle("reveal-file", (_, filePath) => {
   shell.showItemInFolder(filePath);
 });
 
-ipcMain.handle("open-chrome-extensions", async () => {
+function execCommand(command) {
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+  });
+}
+
+// chrome:// isn't a registered OS protocol on Windows (by design — it would
+// let any app deep-link into a browser's internal pages), so
+// shell.openExternal() can't hand it to "the default browser": Windows just
+// shows a "no app can open this link" dialog. To actually reach the browser
+// the user picked in Settings > Default apps, look up that browser's own
+// registered launch command and invoke it directly with the URL as an
+// argument — the browser then interprets its own chrome://-style scheme
+// itself, the way it would if the user typed it into the address bar.
+async function getWindowsDefaultBrowserLaunchCommand() {
+  // Primary source: the explicit choice from Settings > Default apps, if
+  // the user ever went through that picker.
   try {
-    await shell.openExternal("chrome://extensions");
+    const progIdOutput = await execCommand(
+      'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Shell\\Associations\\UrlAssociations\\http\\UserChoice" /v ProgId'
+    );
+    const progIdMatch = progIdOutput.match(/ProgId\s+REG_SZ\s+(\S+)/);
+    const progId = progIdMatch && progIdMatch[1];
+    // ProgIds are short identifiers like "ChromeHTML" or "MSEdgeHTM" — never
+    // contain spaces or shell metacharacters. Reject anything else rather
+    // than interpolate it into the next reg query command.
+    if (progId && /^[\w.-]+$/.test(progId)) {
+      const commandOutput = await execCommand(`reg query "HKCR\\${progId}\\shell\\open\\command" /ve`);
+      const commandMatch = commandOutput.match(/REG_SZ\s+(.+)/);
+      if (commandMatch) return commandMatch[1].trim();
+    }
+  } catch {
+    // No UserChoice recorded (e.g. never set via the picker) — fall
+    // through to the classic association below.
+  }
+
+  // Fallback: HKCR\http is the classic protocol association Windows keeps
+  // pointed at the effective default browser even without an explicit
+  // UserChoice, so this resolves on machines where the picker was never used.
+  const commandOutput = await execCommand('reg query "HKCR\\http\\shell\\open\\command" /ve');
+  const commandMatch = commandOutput.match(/REG_SZ\s+(.+)/);
+  return commandMatch ? commandMatch[1].trim() : null;
+}
+
+ipcMain.handle("open-chrome-extensions", async () => {
+  const url = "chrome://extensions";
+  if (process.platform === "win32") {
+    try {
+      const launchTemplate = await getWindowsDefaultBrowserLaunchCommand();
+      if (launchTemplate) {
+        const launchCommand = launchTemplate.includes("%1")
+          ? launchTemplate.replace("%1", url)
+          : `${launchTemplate} "${url}"`;
+        await execCommand(launchCommand);
+        return { ok: true };
+      }
+    } catch (error) {
+      console.error("Could not launch the default browser directly:", error);
+      // Fall through to the generic attempt below.
+    }
+  }
+  try {
+    await shell.openExternal(url);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
