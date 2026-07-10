@@ -27,6 +27,7 @@ downloadBtn.addEventListener("click", async () => {
     if (result?.ok) {
       setStatus(`Saved to ${result.path}`);
       showToast("Extension package saved", "success");
+      window.api.revealFile(result.path);
     } else if (result?.error !== "cancelled") {
       setStatus("Could not save the extension package.", true);
       showToast("Could not save the extension package.", "error");
@@ -41,10 +42,18 @@ downloadBtn.addEventListener("click", async () => {
 
 chromeExtensionsCode.addEventListener("click", async () => {
   try {
-    await navigator.clipboard.writeText(chromeExtensionsCode.textContent);
-    showToast("Copied — paste it into your browser's address bar", "success");
+    const result = await window.api.openChromeExtensions();
+    if (!result?.ok) {
+      throw new Error(result?.error || "could not open");
+    }
+    showToast("Opening chrome://extensions in your browser…", "success");
   } catch {
-    showToast("Failed to copy", "error");
+    try {
+      await navigator.clipboard.writeText(chromeExtensionsCode.textContent);
+      showToast("Couldn't open automatically — copied to clipboard instead", "warning");
+    } catch {
+      showToast("Failed to open or copy", "error");
+    }
   }
 });
 
