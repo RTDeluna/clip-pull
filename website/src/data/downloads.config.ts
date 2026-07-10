@@ -15,8 +15,8 @@ export interface PlatformDownload {
 export const downloads: Record<"windows" | "macos", PlatformDownload> = {
   windows: {
     state: "available",
-    version: "1.0.0",
-    url: "https://github.com/RTDeluna/clip-pull/releases/latest/download/CLIP.PULL.Setup.1.0.0.exe",
+    version: "1.0.1",
+    url: "https://github.com/RTDeluna/clip-pull/releases/latest/download/CLIP.PULL.Setup.1.0.1.exe",
     fileSizeMb: 103,
     minOsVersion: "Windows 10 64-bit or later",
   },
@@ -26,4 +26,4 @@ export const downloads: Record<"windows" | "macos", PlatformDownload> = {
   },
 };
 
-export const appVersion = "1.0.0";
+export const appVersion = "1.0.1";
