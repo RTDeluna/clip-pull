@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "description": "Paste Vimeo links, download them in parallel with live progress bars.",
   "main": "main.js",
-  "author": "CLIP.PULL",
+  "author": "Clip.Pull rtdeluna",
   "scripts": {
     "start": "electron .",
     "build:backend": "cd backend && python -m PyInstaller --onefile --name clippull-backend --distpath dist --workpath build --specpath . main.py",
