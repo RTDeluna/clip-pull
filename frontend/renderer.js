@@ -9,11 +9,13 @@ const invalidLinesEl = document.getElementById("invalid-lines");
 const outputFolderInput = document.getElementById("output-folder");
 const browseBtn = document.getElementById("browse-btn");
 const refererInput = document.getElementById("referer");
+const courseFolderInput = document.getElementById("course-folder");
 const startBtn = document.getElementById("start-btn");
 const queueList = document.getElementById("queue-list");
 const queueSummary = document.getElementById("queue-summary");
 
 const rows = new Map();
+const summaryCounts = { done: 0, error: 0 };
 
 function statusLabel(entry) {
   if (entry.status === "error") return "Failed";
@@ -48,6 +50,7 @@ function renderRow(entry) {
     el.innerHTML = `
       <div class="queue-row__top">
         <span class="queue-row__title"></span>
+        <span class="queue-row__duplicate-badge" hidden>Already downloaded</span>
         <span class="queue-row__status"></span>
       </div>
       <div class="progress-track"><div class="progress-fill"></div></div>
@@ -60,7 +63,7 @@ function renderRow(entry) {
       <button class="retry-btn" hidden>Retry</button>
     `;
     queueList.appendChild(el);
-    state = { el, maxPercent: 0 };
+    state = { el, maxPercent: 0, lastStatus: null };
     rows.set(entry.id, state);
 
     el.querySelector(".retry-btn").addEventListener("click", () => {
@@ -68,6 +71,12 @@ function renderRow(entry) {
     });
   }
   const row = state.el;
+
+  if (state.lastStatus === "done") summaryCounts.done -= 1;
+  if (state.lastStatus === "error") summaryCounts.error -= 1;
+  if (entry.status === "done") summaryCounts.done += 1;
+  if (entry.status === "error") summaryCounts.error += 1;
+  state.lastStatus = entry.status;
 
   // Vimeo's high-quality formats download as separate video+audio streams,
   // each reported by yt-dlp as its own 0-100% pass — without this, the bar
@@ -80,6 +89,7 @@ function renderRow(entry) {
   state.maxPercent = displayPercent;
 
   row.querySelector(".queue-row__title").textContent = entry.title || entry.url;
+  row.querySelector(".queue-row__duplicate-badge").hidden = !entry.previously_downloaded;
   const statusEl = row.querySelector(".queue-row__status");
   statusEl.textContent = statusLabel(entry);
   statusEl.className = "queue-row__status";
@@ -105,11 +115,9 @@ function renderRow(entry) {
 }
 
 function updateSummary() {
-  const entries = Array.from(rows.keys()).length;
-  const done = Array.from(queueList.querySelectorAll(".queue-row__status--done")).length;
-  const failed = Array.from(queueList.querySelectorAll(".queue-row__status--error")).length;
-  queueSummary.textContent = entries
-    ? `${done}/${entries} downloaded${failed ? `, ${failed} failed` : ""}`
+  const total = rows.size;
+  queueSummary.textContent = total
+    ? `${summaryCounts.done}/${total} downloaded${summaryCounts.error ? `, ${summaryCounts.error} failed` : ""}`
     : "";
 }
 
@@ -183,6 +191,7 @@ startBtn.addEventListener("click", async () => {
         urls_text: urlsInput.value,
         output_folder: outputFolderInput.value,
         referer: refererInput.value || null,
+        subfolder: courseFolderInput.value || null,
       }),
     });
     const body = await response.json();
@@ -208,5 +217,15 @@ connectQueueSocket((event) => {
     event.entries.forEach(renderRow);
   } else if (event.type === "update") {
     renderRow(event.entry);
+  } else if (event.type === "update_batch") {
+    event.entries.forEach(renderRow);
+  } else if (event.type === "batch_complete") {
+    if (window.Notification && Notification.permission === "granted") {
+      new Notification("Batch complete", {
+        body: `${event.summary.done} done, ${event.summary.error} failed`,
+      });
+    } else if (window.Notification && Notification.permission !== "denied") {
+      Notification.requestPermission();
+    }
   }
 });

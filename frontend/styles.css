@@ -353,3 +353,14 @@ body {
   gap: 8px;
   margin-bottom: 16px;
 }
+
+.queue-row__duplicate-badge {
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(255, 176, 32, 0.15);
+  border: 1px solid rgba(255, 176, 32, 0.3);
+  border-radius: 4px;
+  padding: 2px 6px;
+  text-transform: uppercase;
+  margin-left: 6px;
+}
