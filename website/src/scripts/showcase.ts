@@ -1,46 +1,35 @@
-const AUTOPLAY_MS = 5000;
+const AUTOPLAY_MS = 6000;
 
 export function initShowcase(): void {
   const root = document.getElementById("showcase");
   if (!root) return;
 
-  const panels = Array.from(root.querySelectorAll<HTMLElement>(".showcase-panel"));
-  const tabButtons = Array.from(root.querySelectorAll<HTMLButtonElement>(".showcase-tab"));
+  const cards = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-showcase-card]"));
+  const dots = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-showcase-dot]"));
+  const prevBtn = root.querySelector<HTMLButtonElement>("[data-showcase-prev]");
+  const nextBtn = root.querySelector<HTMLButtonElement>("[data-showcase-next]");
   const caption = document.getElementById("showcase-caption");
   const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const count = cards.length;
+  if (count === 0) return;
 
   let activeIndex = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let paused = false;
 
-  function resetFill(button: HTMLButtonElement): void {
-    const fill = button.querySelector<HTMLElement>(".showcase-tab__fill");
-    if (!fill) return;
-    fill.style.transition = "none";
-    fill.style.width = "0%";
-  }
-
-  function runFill(button: HTMLButtonElement): void {
-    const fill = button.querySelector<HTMLElement>(".showcase-tab__fill");
-    if (!fill || prefersReducedMotion) return;
-    fill.style.transition = "none";
-    fill.style.width = "0%";
-    // Force a reflow so the next width change actually transitions.
-    void fill.offsetWidth;
-    fill.style.transition = `width ${AUTOPLAY_MS}ms linear`;
-    fill.style.width = "100%";
-  }
-
   function activate(index: number): void {
-    activeIndex = (index + tabButtons.length) % tabButtons.length;
-    panels.forEach((panel, i) => panel.classList.toggle("is-active", i === activeIndex));
-    tabButtons.forEach((btn, i) => {
-      btn.classList.toggle("is-active", i === activeIndex);
-      btn.setAttribute("aria-pressed", String(i === activeIndex));
-      if (i === activeIndex) runFill(btn);
-      else resetFill(btn);
+    activeIndex = ((index % count) + count) % count;
+    cards.forEach((card, i) => {
+      // Circular distance ahead of the active card — 0 is frontmost, and
+      // each step further back peeks out a little less from behind it.
+      const offset = (i - activeIndex + count) % count;
+      card.style.setProperty("--offset", String(offset));
+      card.setAttribute("aria-current", String(i === activeIndex));
     });
-    if (caption) caption.textContent = tabButtons[activeIndex]?.dataset.caption ?? "";
+    dots.forEach((dot, i) => {
+      dot.setAttribute("aria-selected", String(i === activeIndex));
+    });
+    if (caption) caption.textContent = cards[activeIndex]?.dataset.caption ?? "";
     scheduleNext();
   }
 
@@ -50,8 +39,18 @@ export function initShowcase(): void {
     timer = setTimeout(() => activate(activeIndex + 1), AUTOPLAY_MS);
   }
 
-  tabButtons.forEach((btn, i) => {
-    btn.addEventListener("click", () => activate(i));
+  cards.forEach((card, i) => {
+    card.addEventListener("click", () => activate(i));
+  });
+  dots.forEach((dot, i) => {
+    dot.addEventListener("click", () => activate(i));
+  });
+  prevBtn?.addEventListener("click", () => activate(activeIndex - 1));
+  nextBtn?.addEventListener("click", () => activate(activeIndex + 1));
+
+  root.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft") activate(activeIndex - 1);
+    if (event.key === "ArrowRight") activate(activeIndex + 1);
   });
 
   root.addEventListener("mouseenter", () => {

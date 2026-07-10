@@ -260,25 +260,73 @@ body::before {
   animation: shimmer-sweep 1.6s ease-in-out infinite;
 }
 
-/* App showcase carousel */
-.showcase-panel {
-  opacity: 0;
-  pointer-events: none;
+/* App showcase carousel — a bento grid where every card shares one grid
+   cell (identical, equally-sized frame for every screenshot); the "stacked
+   deck" look comes entirely from the --offset custom property each card
+   carries, not from any per-card sizing difference. */
+.showcase-card {
+  position: relative;
+  grid-area: 1 / 1;
+  cursor: pointer;
+  transform-origin: 50% 50%;
+  transform: translateX(calc(var(--offset, 0) * clamp(10px, 3vw, 30px)))
+    scale(calc(1 - var(--offset, 0) * 0.06));
+  opacity: max(0, calc(1 - var(--offset, 0) * 0.34));
+  z-index: calc(40 - var(--offset, 0) * 10);
+  box-shadow: var(--glass-shadow);
+  transition: transform 550ms var(--ease), opacity 550ms var(--ease), box-shadow 250ms var(--ease);
 }
-.showcase-panel.is-active {
-  opacity: 1;
-  pointer-events: auto;
+.showcase-card:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35), var(--glass-shadow);
+}
+.showcase-card[aria-current="true"] {
+  cursor: default;
 }
 
-.showcase-tab__bar {
-  background: var(--input-bg);
-}
-.showcase-tab__fill {
-  width: 0%;
-}
-.showcase-tab.is-active {
+.showcase-card__badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--glass-border);
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text);
+  pointer-events: none;
+}
+
+.showcase-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-pill);
+  color: var(--text);
+  transition: border-color 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--ease);
+}
+.showcase-arrow:hover {
   border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-50%) scale(1.06);
+}
+.showcase-arrow:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
+.showcase-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--glass-border);
+  transition: width 300ms var(--ease), background-color 300ms var(--ease);
+}
+.showcase-dot[aria-selected="true"] {
+  width: 26px;
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent-strong-2) 100%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -286,10 +334,10 @@ body::before {
   .shimmer::after {
     animation: none;
   }
-  .showcase-panel {
+  .showcase-card {
     transition: none !important;
   }
-  .showcase-tab__fill {
+  .showcase-dot {
     transition: none !important;
   }
   .reveal {

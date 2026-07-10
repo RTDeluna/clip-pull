@@ -9,6 +9,8 @@ import IconBatch from "../icons/IconBatch.astro";
 import IconClock from "../icons/IconClock.astro";
 import IconSliders from "../icons/IconSliders.astro";
 import IconPuzzle from "../icons/IconPuzzle.astro";
+import IconChevronLeft from "../icons/IconChevronLeft.astro";
+import IconChevronRight from "../icons/IconChevronRight.astro";
 
 const tabs = [
   {
@@ -49,45 +51,79 @@ const tabs = [
       subtitle="Queue, History, Settings, and the browser extension — a quick tour of the whole app."
     />
 
-    <div class="reveal mt-12" id="showcase">
-      <div class="glass rounded-panel p-2 sm:p-3 shadow-2xl relative aspect-[16/9] overflow-hidden">
-        {tabs.map((tab, index) => (
-          <div
-            class="showcase-panel absolute inset-0 transition-opacity duration-500"
-            data-panel={index}
-          >
-            <Image
-              src={tab.image}
-              alt={`Screenshot of the CLIP.PULL desktop app's ${tab.label} view`}
-              widths={[640, 1000, 1400, 1915]}
-              sizes="(min-width: 1024px) 1000px, 90vw"
-              class="w-full h-full object-cover object-top rounded-[calc(var(--radius-lg)-6px)]"
-              loading={index === 0 ? "eager" : "lazy"}
-            />
-          </div>
-        ))}
+    <div class="reveal mt-14" id="showcase">
+      <div class="showcase-stage relative mx-auto max-w-3xl px-9 sm:px-16">
+        <button
+          type="button"
+          data-ripple
+          data-showcase-prev
+          aria-label="Previous screenshot"
+          class="showcase-arrow glass-strong border border-glass-border absolute left-0 top-1/2 -translate-y-1/2 z-50"
+        >
+          <IconChevronLeft class="w-5 h-5" />
+        </button>
+
+        <!--
+          Bento grid: every card is placed in the exact same single grid
+          cell, so the grid track — not per-card sizing — is what makes
+          every screenshot occupy an identical, equally-sized frame. The
+          "stacked deck" look comes entirely from the --offset custom
+          property each card carries (set in showcase.ts), not from any
+          per-card width/height difference.
+        -->
+        <div class="showcase-deck grid">
+          {tabs.map((tab, index) => (
+            <button
+              type="button"
+              data-showcase-card={index}
+              data-caption={tab.caption}
+              aria-label={`View the ${tab.label} screenshot`}
+              aria-current={index === 0 ? "true" : "false"}
+              style={`--offset:${index}`}
+              class="showcase-card col-start-1 row-start-1 w-full aspect-[1.91/1] rounded-panel overflow-hidden glass border border-glass-border"
+            >
+              <Image
+                src={tab.image}
+                alt={`Screenshot of the CLIP.PULL desktop app's ${tab.label} view`}
+                widths={[480, 768, 1100, 1600]}
+                sizes="(min-width: 1024px) 768px, 90vw"
+                class="w-full h-full object-cover object-top pointer-events-none"
+                loading={index === 0 ? "eager" : "lazy"}
+              />
+              <span class="showcase-card__badge glass-strong">
+                <tab.icon class="w-4 h-4 text-accent" />
+                {tab.label}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          data-ripple
+          data-showcase-next
+          aria-label="Next screenshot"
+          class="showcase-arrow glass-strong border border-glass-border absolute right-0 top-1/2 -translate-y-1/2 z-50"
+        >
+          <IconChevronRight class="w-5 h-5" />
+        </button>
       </div>
 
-      <p id="showcase-caption" class="mt-5 text-center text-sm text-text-dim min-h-[1.5em]">
+      <p id="showcase-caption" class="mt-6 text-center text-sm text-text-dim min-h-[1.5em]">
         {tabs[0].caption}
       </p>
 
-      <div class="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="mt-5 flex items-center justify-center gap-2" role="tablist" aria-label="Screenshot pagination">
         {tabs.map((tab, index) => (
           <button
             type="button"
             data-ripple
-            data-showcase-tab={index}
-            data-caption={tab.caption}
-            aria-pressed={index === 0 ? "true" : "false"}
-            class="showcase-tab relative overflow-hidden glass rounded-card px-3 py-3 flex flex-col items-center gap-2 text-xs font-semibold text-text-dim transition-colors duration-150 cursor-pointer"
-          >
-            <tab.icon class="w-5 h-5" />
-            {tab.label}
-            <span class="showcase-tab__bar absolute bottom-0 left-0 h-[3px] w-full rounded-b-card overflow-hidden bg-transparent">
-              <span class="showcase-tab__fill block h-full w-0 gradient-accent"></span>
-            </span>
-          </button>
+            data-showcase-dot={index}
+            role="tab"
+            aria-selected={index === 0 ? "true" : "false"}
+            aria-label={`Show the ${tab.label} screenshot`}
+            class="showcase-dot rounded-pill"
+          ></button>
         ))}
       </div>
     </div>
