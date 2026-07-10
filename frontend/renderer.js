@@ -44,7 +44,7 @@ function formatSizeLine(entry, displayPercent) {
   return `${downloaded} / ${total} · ${Math.round(displayPercent)}%`;
 }
 
-function renderRow(entry) {
+function renderRow(entry, { announceCompletion = true } = {}) {
   let state = rows.get(entry.id);
   if (!state) {
     const el = document.createElement("li");
@@ -86,6 +86,22 @@ function renderRow(entry) {
   if (state.lastStatus === "error") summaryCounts.error -= 1;
   if (entry.status === "done") summaryCounts.done += 1;
   if (entry.status === "error") summaryCounts.error += 1;
+
+  // Fire once, the moment a download actually finishes — not on every
+  // re-render with the same terminal status, and not for entries that
+  // were already done/error at initial WS "sync" (those already finished
+  // before this client connected, so there's nothing new to announce).
+  if (announceCompletion && entry.status !== state.lastStatus) {
+    if (entry.status === "done") {
+      showToast(`Download complete: ${entry.title || entry.url}`, "success");
+    } else if (entry.status === "error") {
+      showToast(
+        `Download failed: ${entry.title || entry.url}${entry.error_reason ? ` — ${entry.error_reason}` : ""}`,
+        "error"
+      );
+    }
+  }
+
   state.lastStatus = entry.status;
 
   // Vimeo's high-quality formats download as separate video+audio streams,
@@ -247,12 +263,25 @@ const duplicateList = document.getElementById("duplicate-confirm-list");
 const duplicateSkipBtn = document.getElementById("duplicate-confirm-skip");
 const duplicateContinueBtn = document.getElementById("duplicate-confirm-continue");
 
+// Long URLs otherwise wrap at an arbitrary character mid-word. Splitting
+// right after each natural delimiter and inserting a <wbr> there lets the
+// browser prefer breaking at those points instead.
+function appendUrlWithBreakHints(li, url) {
+  const parts = url.split(/(?<=[/?&=])/);
+  parts.forEach((part, i) => {
+    li.appendChild(document.createTextNode(part));
+    if (i < parts.length - 1) {
+      li.appendChild(document.createElement("wbr"));
+    }
+  });
+}
+
 function confirmDuplicates(duplicateUrls) {
   return new Promise((resolve) => {
     duplicateList.innerHTML = "";
     duplicateUrls.forEach((url) => {
       const li = document.createElement("li");
-      li.textContent = url;
+      appendUrlWithBreakHints(li, url);
       duplicateList.appendChild(li);
     });
     duplicateOverlay.hidden = false;
@@ -276,7 +305,22 @@ function confirmDuplicates(duplicateUrls) {
       if (event.target === duplicateOverlay) cleanup(null);
     }
     function onKeydown(event) {
-      if (event.key === "Escape") cleanup(null);
+      if (event.key === "Escape") {
+        cleanup(null);
+        return;
+      }
+      // Trap Tab focus between the two buttons — they're the only
+      // focusable elements in the modal — so it doesn't leak to the page
+      // underneath while the overlay is open.
+      if (event.key === "Tab") {
+        if (event.shiftKey && document.activeElement === duplicateSkipBtn) {
+          event.preventDefault();
+          duplicateContinueBtn.focus();
+        } else if (!event.shiftKey && document.activeElement === duplicateContinueBtn) {
+          event.preventDefault();
+          duplicateSkipBtn.focus();
+        }
+      }
     }
 
     duplicateSkipBtn.addEventListener("click", onSkip);
@@ -329,6 +373,9 @@ startBtn.addEventListener("click", async () => {
 
     if (body.entries.length) {
       showToast(`Added ${body.entries.length} link${body.entries.length === 1 ? "" : "s"} to the queue`, "success");
+    } else if (body.skipped_duplicate_urls && body.skipped_duplicate_urls.length > 0) {
+      const count = body.skipped_duplicate_urls.length;
+      showToast(`Skipped ${count} duplicate link${count === 1 ? "" : "s"} — nothing left to queue`, "info");
     }
 
     body.entries.forEach(renderRow);
@@ -345,7 +392,7 @@ startBtn.addEventListener("click", async () => {
 
 connectQueueSocket((event) => {
   if (event.type === "sync") {
-    event.entries.forEach(renderRow);
+    event.entries.forEach((entry) => renderRow(entry, { announceCompletion: false }));
   } else if (event.type === "update_batch") {
     event.entries.forEach(renderRow);
   } else if (event.type === "removed") {
