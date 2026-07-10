@@ -22,8 +22,13 @@ function applySettings(settings) {
 }
 
 async function loadSettings() {
-  const response = await fetch(`${API_BASE}/settings`);
-  applySettings(await response.json());
+  try {
+    const response = await fetch(`${API_BASE}/settings`);
+    if (!response.ok) return;
+    applySettings(await response.json());
+  } catch {
+    // Leave the form at whatever state it's already in.
+  }
 }
 
 browseBtn.addEventListener("click", async () => {
@@ -32,18 +37,27 @@ browseBtn.addEventListener("click", async () => {
 });
 
 saveBtn.addEventListener("click", async () => {
-  const response = await fetch(`${API_BASE}/settings`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      max_concurrent_downloads: Number(maxConcurrentInput.value),
-      concurrent_fragment_downloads: Number(fragmentConcurrencyInput.value),
-      aria2c_enabled: aria2cEnabledInput.checked,
-      skip_duplicates: skipDuplicatesInput.checked,
-      default_output_folder: defaultFolderInput.value || null,
-    }),
-  });
-  applySettings(await response.json());
+  try {
+    const response = await fetch(`${API_BASE}/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        max_concurrent_downloads: Number(maxConcurrentInput.value),
+        concurrent_fragment_downloads: Number(fragmentConcurrencyInput.value),
+        aria2c_enabled: aria2cEnabledInput.checked,
+        skip_duplicates: skipDuplicatesInput.checked,
+        default_output_folder: defaultFolderInput.value || null,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      alert("Failed to save settings" + (body ? ": " + JSON.stringify(body.detail) : "."));
+      return;
+    }
+    applySettings(await response.json());
+  } catch (error) {
+    alert("Failed to reach the backend: " + error.message);
+  }
 });
 
 loadSettings();

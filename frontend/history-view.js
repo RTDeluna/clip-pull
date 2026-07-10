@@ -33,13 +33,18 @@ function renderHistoryRow(entry) {
 }
 
 async function loadHistory() {
-  const params = new URLSearchParams();
-  if (searchInput.value) params.set("q", searchInput.value);
-  if (statusFilter.value) params.set("status", statusFilter.value);
-  const response = await fetch(`${API_BASE}/history?${params.toString()}`);
-  const body = await response.json();
-  historyList.innerHTML = "";
-  body.entries.forEach((entry) => historyList.appendChild(renderHistoryRow(entry)));
+  try {
+    const params = new URLSearchParams();
+    if (searchInput.value) params.set("q", searchInput.value);
+    if (statusFilter.value) params.set("status", statusFilter.value);
+    const response = await fetch(`${API_BASE}/history?${params.toString()}`);
+    if (!response.ok) return;
+    const body = await response.json();
+    historyList.innerHTML = "";
+    body.entries.forEach((entry) => historyList.appendChild(renderHistoryRow(entry)));
+  } catch {
+    // Backend unreachable or errored — leave the list as-is.
+  }
 }
 
 let debounceTimer;
