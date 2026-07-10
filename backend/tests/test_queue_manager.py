@@ -41,6 +41,21 @@ def test_update_progress_sets_percent_speed_eta():
     assert updated.eta == 30
 
 
+def test_update_progress_sets_speed_bytes():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.5, "1.2MiB/s", 30, "45.2MB", "120.4MB", 1258291.2)
+    updated = manager.get(entry.id)
+    assert updated.speed_bytes == 1258291.2
+
+
+def test_update_progress_defaults_speed_bytes_to_none_when_omitted():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.5, "1.2MiB/s", 30)
+    assert manager.get(entry.id).speed_bytes is None
+
+
 def test_update_progress_sets_downloaded_and_total_size():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -71,11 +86,12 @@ def test_set_error_sets_status_and_reason():
 def test_mark_paused_sets_status_and_clears_speed_eta_but_keeps_progress():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
-    manager.update_progress(entry.id, 42.0, "1MiB/s", 30, "42MB", "100MB")
+    manager.update_progress(entry.id, 42.0, "1MiB/s", 30, "42MB", "100MB", 1048576.0)
     manager.mark_paused(entry.id)
     updated = manager.get(entry.id)
     assert updated.status == "paused"
     assert updated.speed is None
+    assert updated.speed_bytes is None
     assert updated.eta is None
     assert updated.percent == 42.0
     assert updated.downloaded_size == "42MB"
@@ -85,13 +101,14 @@ def test_mark_paused_sets_status_and_clears_speed_eta_but_keeps_progress():
 def test_reset_for_retry_clears_progress_and_increments_retry_count():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
-    manager.update_progress(entry.id, 50.0, "1MiB/s", 10, "50MB", "100MB")
+    manager.update_progress(entry.id, 50.0, "1MiB/s", 10, "50MB", "100MB", 1048576.0)
     manager.set_error(entry.id, "some error")
     manager.reset_for_retry(entry.id)
     updated = manager.get(entry.id)
     assert updated.status == "queued"
     assert updated.percent == 0.0
     assert updated.speed is None
+    assert updated.speed_bytes is None
     assert updated.eta is None
     assert updated.downloaded_size is None
     assert updated.total_size is None

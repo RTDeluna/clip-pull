@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from background_tasks import track_task
-from downloader import DownloadOrchestrator, check_ffmpeg_available
+from downloader import DownloadOrchestrator, check_ffmpeg_available, probe_total_bytes
 from history_routes import build_history_router
 from history_store import HistoryStore
 from queue_manager import QueueManager
@@ -32,6 +32,7 @@ settings_store = SettingsStore(DB_PATH)
 queue_manager = QueueManager(on_update=broadcaster.notify, on_remove=broadcaster.notify_removed)
 orchestrator = DownloadOrchestrator(
     queue_manager,
+    probe_fn=probe_total_bytes,
     get_max_concurrent=lambda: settings_store.get()["max_concurrent_downloads"],
     get_fragment_concurrency=lambda: settings_store.get()["concurrent_fragment_downloads"],
     get_aria2c_enabled=lambda: settings_store.get()["aria2c_enabled"],

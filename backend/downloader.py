@@ -167,6 +167,38 @@ def run_download(
         return ydl.extract_info(url, download=True)
 
 
+def probe_total_bytes(url: str, referer: Optional[str]) -> Optional[int]:
+    """Best-effort lookahead so the progress bar can show one continuously
+    climbing percentage across every stream in a download (e.g. yt-dlp
+    downloading separate video and audio streams for ffmpeg to merge) instead
+    of restarting at 0% each time it begins the next stream. Runs a
+    metadata-only extraction (no download) to read the selected formats'
+    advertised filesize; returns None whenever that isn't available (or
+    extraction fails for any other reason) — the caller then falls back to
+    reporting each stream's own percentage, exactly as before this existed."""
+    import yt_dlp
+
+    opts = {
+        "format": "bestvideo+bestaudio/best",
+        "quiet": True,
+        "no_warnings": True,
+    }
+    if referer:
+        opts["http_headers"] = {"Referer": referer}
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        return None
+    if not isinstance(info, dict):
+        return None
+    formats = info.get("requested_formats") or [info]
+    sizes = [f.get("filesize") or f.get("filesize_approx") for f in formats]
+    if not sizes or any(size is None for size in sizes):
+        return None
+    return sum(sizes)
+
+
 class DownloadPaused(Exception):
     """Raised from progress_hook — which yt-dlp invokes on the download's
     worker thread — to unwind an in-flight ydl.extract_info() call the
@@ -181,6 +213,7 @@ class DownloadOrchestrator:
         queue_manager: QueueManager,
         max_concurrent: int = MAX_CONCURRENT_DOWNLOADS,
         download_fn: Callable = run_download,
+        probe_fn: Optional[Callable[[str, Optional[str]], Optional[int]]] = None,
         get_max_concurrent: Optional[Callable[[], int]] = None,
         get_fragment_concurrency: Optional[Callable[[], int]] = None,
         get_aria2c_enabled: Optional[Callable[[], bool]] = None,
@@ -190,6 +223,7 @@ class DownloadOrchestrator:
     ):
         self.queue_manager = queue_manager
         self.download_fn = download_fn
+        self.probe_fn = probe_fn
         self.get_max_concurrent = get_max_concurrent or (lambda: max_concurrent)
         self.get_fragment_concurrency = get_fragment_concurrency or (
             lambda: CONCURRENT_FRAGMENT_DOWNLOADS
@@ -247,9 +281,21 @@ class DownloadOrchestrator:
             url = entry.url
             last_progress_time = 0.0
             smoothed_speed: Optional[float] = None
+            prior_streams_bytes = 0
+            last_stream_total: Optional[int] = None
+
+            # Best-effort lookahead so a download with separate video+audio
+            # streams shows one continuously-climbing percentage across both,
+            # instead of the bar completing at 100% then restarting at 0% when
+            # the second stream begins. probe_fn is None by default (tests and
+            # any caller that doesn't opt in keep the old per-stream behavior
+            # unchanged); the real app wires in probe_total_bytes.
+            expected_total_bytes: Optional[int] = None
+            if self.probe_fn is not None:
+                expected_total_bytes = await loop.run_in_executor(None, self.probe_fn, url, referer)
 
             def progress_hook(d: dict) -> None:
-                nonlocal last_progress_time, smoothed_speed
+                nonlocal last_progress_time, smoothed_speed, prior_streams_bytes, last_stream_total
                 if entry_id in self._pause_requested:
                     raise DownloadPaused()
                 if d.get("status") != "downloading":
@@ -260,11 +306,30 @@ class DownloadOrchestrator:
                 last_progress_time = now
                 downloaded = d.get("downloaded_bytes")
                 total = d.get("total_bytes") or d.get("total_bytes_estimate")
-                percent = (
-                    round((downloaded / total) * 100, 1)
-                    if downloaded is not None and total
-                    else 0.0
-                )
+
+                # A new total_bytes value (that isn't just the first reading)
+                # means yt-dlp has moved on to the next stream — fold the
+                # previous stream's full size into the running total so
+                # overall progress keeps climbing instead of resetting.
+                if total is not None and total != last_stream_total:
+                    if last_stream_total is not None:
+                        prior_streams_bytes += last_stream_total
+                    last_stream_total = total
+
+                if expected_total_bytes and downloaded is not None:
+                    overall_downloaded = prior_streams_bytes + downloaded
+                    percent = round(min(overall_downloaded / expected_total_bytes, 1.0) * 100, 1)
+                    downloaded_size = format_bytes(overall_downloaded)
+                    total_size = format_bytes(expected_total_bytes)
+                else:
+                    percent = (
+                        round((downloaded / total) * 100, 1)
+                        if downloaded is not None and total
+                        else 0.0
+                    )
+                    downloaded_size = format_bytes(downloaded)
+                    total_size = format_bytes(total)
+
                 # yt-dlp's raw per-chunk speed swings wildly between calls
                 # (fragment boundaries, brief network hiccups) even when the
                 # real throughput is steady — an exponential moving average
@@ -278,11 +343,9 @@ class DownloadOrchestrator:
                 speed = format_speed(smoothed_speed)
                 eta_raw = d.get("eta")
                 eta = int(eta_raw) if eta_raw is not None else None
-                downloaded_size = format_bytes(downloaded)
-                total_size = format_bytes(total)
                 loop.call_soon_threadsafe(
                     self.queue_manager.update_progress,
-                    entry_id, percent, speed, eta, downloaded_size, total_size,
+                    entry_id, percent, speed, eta, downloaded_size, total_size, smoothed_speed,
                 )
 
             try:

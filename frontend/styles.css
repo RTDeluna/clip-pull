@@ -182,7 +182,7 @@ body::before {
   margin-right: -4px;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1100px) {
   .bento {
     grid-template-columns: 1fr;
   }
@@ -588,16 +588,18 @@ input[type="checkbox"] {
 .queue-row__top {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   margin-bottom: 12px;
 }
 
 .queue-row__title {
+  flex: 1;
+  min-width: 0;
   font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .queue-row__status {
@@ -658,7 +660,7 @@ input[type="checkbox"] {
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
   transform: translateX(-100%);
-  animation: shimmer-sweep 1.6s ease-in-out infinite;
+  animation: shimmer-sweep var(--shimmer-duration, 1.6s) ease-in-out infinite;
 }
 
 @keyframes shimmer-sweep {
@@ -860,9 +862,9 @@ input[type="checkbox"] {
 .history-row__title {
   font-size: 14px;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .history-row__title--clickable {
@@ -882,9 +884,8 @@ input[type="checkbox"] {
   margin-top: 4px;
   font-size: 12px;
   color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .history-row__actions {
@@ -1152,6 +1153,7 @@ input[type="checkbox"] {
 }
 
 .queue-row__duplicate-badge {
+  flex-shrink: 0;
   font-size: 10px;
   font-weight: 600;
   color: var(--accent);

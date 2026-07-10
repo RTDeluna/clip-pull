@@ -44,6 +44,25 @@ function formatSizeLine(entry, displayPercent) {
   return `${downloaded} / ${total} · ${Math.round(displayPercent)}%`;
 }
 
+// ── Speed-linked shimmer effect ──────────────────────────────────────
+// The moving highlight that sweeps across an in-progress bar (see
+// .queue-row--downloading .progress-fill::after in styles.css) runs faster
+// as the download's actual throughput climbs, so the bar visibly "feels"
+// like it's moving quicker on a fast connection and eases off on a slow
+// one, instead of always sweeping at the same fixed pace regardless of
+// real speed.
+const SHIMMER_MIN_DURATION_S = 0.6; // fastest sweep, at/above the reference speed
+const SHIMMER_MAX_DURATION_S = 2.2; // slowest sweep, at/near 0 B/s
+const SHIMMER_REFERENCE_SPEED_BYTES = 5 * 1024 * 1024; // 5 MiB/s reads as "fast"
+
+function shimmerDurationForSpeed(speedBytesPerSecond) {
+  if (!speedBytesPerSecond || speedBytesPerSecond <= 0) {
+    return SHIMMER_MAX_DURATION_S;
+  }
+  const ratio = Math.min(speedBytesPerSecond / SHIMMER_REFERENCE_SPEED_BYTES, 1);
+  return SHIMMER_MAX_DURATION_S - ratio * (SHIMMER_MAX_DURATION_S - SHIMMER_MIN_DURATION_S);
+}
+
 // ── Perceived-speed smoothing ────────────────────────────────────────
 // The backend only pushes an update every ~250ms, and yt-dlp's raw
 // per-chunk numbers arrive in visible jumps. Snapping the bar straight to
@@ -175,6 +194,7 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   state.maxPercent = displayPercent;
 
   row.classList.toggle("queue-row--downloading", entry.status === "downloading");
+  row.style.setProperty("--shimmer-duration", `${shimmerDurationForSpeed(entry.speed_bytes)}s`);
 
   row.querySelector(".queue-row__title").textContent = entry.title || entry.url;
   row.querySelector(".queue-row__duplicate-badge").hidden = !entry.previously_downloaded;

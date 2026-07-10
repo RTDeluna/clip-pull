@@ -11,6 +11,7 @@ class QueueEntry:
     status: str = "queued"
     percent: float = 0.0
     speed: Optional[str] = None
+    speed_bytes: Optional[float] = None
     eta: Optional[int] = None
     downloaded_size: Optional[str] = None
     total_size: Optional[str] = None
@@ -28,6 +29,7 @@ class QueueEntry:
             "status": self.status,
             "percent": self.percent,
             "speed": self.speed,
+            "speed_bytes": self.speed_bytes,
             "eta": self.eta,
             "downloaded_size": self.downloaded_size,
             "total_size": self.total_size,
@@ -124,10 +126,12 @@ class QueueManager:
         eta: Optional[int],
         downloaded_size: Optional[str] = None,
         total_size: Optional[str] = None,
+        speed_bytes: Optional[float] = None,
     ) -> None:
         entry = self._entries[entry_id]
         entry.percent = percent
         entry.speed = speed
+        entry.speed_bytes = speed_bytes
         entry.eta = eta
         entry.downloaded_size = downloaded_size
         entry.total_size = total_size
@@ -146,6 +150,7 @@ class QueueManager:
         entry = self._entries[entry_id]
         entry.status = "paused"
         entry.speed = None
+        entry.speed_bytes = None
         entry.eta = None
         self._notify(entry)
 
@@ -154,6 +159,7 @@ class QueueManager:
         entry.status = "queued"
         entry.percent = 0.0
         entry.speed = None
+        entry.speed_bytes = None
         entry.eta = None
         entry.downloaded_size = None
         entry.total_size = None

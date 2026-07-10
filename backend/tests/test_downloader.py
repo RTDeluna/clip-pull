@@ -16,6 +16,7 @@ from downloader import (
     format_speed,
     humanize_error_reason,
     is_referer_blocked_error,
+    probe_total_bytes,
     resolve_output_folder,
     resolve_use_aria2c,
     sanitize_filename,
@@ -182,11 +183,11 @@ def test_progress_hook_produces_clean_speed_and_integer_eta():
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
     ):
-        calls.append((percent, speed, eta, downloaded_size, total_size))
+        calls.append((percent, speed, eta, downloaded_size, total_size, speed_bytes))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
         )
 
     manager.update_progress = capturing_update_progress
@@ -211,13 +212,14 @@ def test_progress_hook_produces_clean_speed_and_integer_eta():
     orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
     asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
 
-    _, first_speed, first_eta, first_downloaded_size, first_total_size = calls[0]
+    _, first_speed, first_eta, first_downloaded_size, first_total_size, first_speed_bytes = calls[0]
     assert first_speed == "1001.4KiB/s"
     assert "\x1b" not in first_speed
     assert first_eta == 17
     assert isinstance(first_eta, int)
     assert first_downloaded_size == "50B"
     assert first_total_size == "100B"
+    assert first_speed_bytes == 1025453.0
 
 
 def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
@@ -235,11 +237,11 @@ def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
     ):
-        calls.append((percent, speed, eta, downloaded_size, total_size))
+        calls.append((percent, speed, eta, downloaded_size, total_size, speed_bytes))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
         )
 
     manager.update_progress = capturing_update_progress
@@ -255,9 +257,10 @@ def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
 
     final_calls = [c for c in calls if c[0] == 100.0]
     assert len(final_calls) == 1
-    _, _, _, downloaded_size, total_size = final_calls[0]
+    _, _, _, downloaded_size, total_size, speed_bytes = final_calls[0]
     assert downloaded_size is None
     assert total_size is None
+    assert speed_bytes is None
     assert manager.get(entry.id).status == "done"
 
 
@@ -301,11 +304,11 @@ def test_progress_hook_throttles_rapid_updates():
     original_update_progress = manager.update_progress
 
     def counting_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
     ):
         call_count["n"] += 1
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
         )
 
     manager.update_progress = counting_update_progress
@@ -335,6 +338,250 @@ def test_progress_hook_throttles_rapid_updates():
     updated = manager.get(entry.id)
     assert updated.status == "done"
     assert updated.percent == 100.0
+
+
+def test_probe_total_bytes_sums_filesize_across_requested_formats():
+    class FakeYdl:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            assert download is False
+            return {"requested_formats": [{"filesize": 1000}, {"filesize": 500}]}
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        assert probe_total_bytes("https://vimeo.com/111", None) == 1500
+
+
+def test_probe_total_bytes_falls_back_to_filesize_approx():
+    class FakeYdl:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"requested_formats": [{"filesize": None, "filesize_approx": 2000}]}
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        assert probe_total_bytes("https://vimeo.com/111", None) == 2000
+
+
+def test_probe_total_bytes_handles_single_format_without_requested_formats():
+    class FakeYdl:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"filesize": 42}
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        assert probe_total_bytes("https://vimeo.com/111", None) == 42
+
+
+def test_probe_total_bytes_returns_none_when_any_format_size_unknown():
+    class FakeYdl:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {
+                "requested_formats": [
+                    {"filesize": 1000},
+                    {"filesize": None, "filesize_approx": None},
+                ]
+            }
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        assert probe_total_bytes("https://vimeo.com/111", None) is None
+
+
+def test_probe_total_bytes_returns_none_on_extraction_failure():
+    class FakeYdl:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            raise Exception("network error")
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        assert probe_total_bytes("https://vimeo.com/111", None) is None
+
+
+def test_probe_total_bytes_includes_referer_header_when_provided():
+    captured_opts = {}
+
+    class FakeYdl:
+        def __init__(self, opts):
+            captured_opts.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"filesize": 10}
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        probe_total_bytes("https://vimeo.com/111", "https://school.com")
+
+    assert captured_opts["http_headers"] == {"Referer": "https://school.com"}
+
+
+def test_progress_hook_computes_weighted_percent_across_two_streams_when_probe_available():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+    ):
+        calls.append((percent, downloaded_size, total_size))
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+        )
+
+    manager.update_progress = capturing_update_progress
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        # Video stream: 400 of 800, then completes at 800 of 800.
+        progress_hook({"status": "downloading", "downloaded_bytes": 400, "total_bytes": 800})
+        time.sleep(0.26)  # clear the throttle window deterministically
+        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
+        time.sleep(0.26)
+        # Audio stream starts — total_bytes drops to 200, downloaded resets low.
+        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 200})
+        return {"title": "Lesson 1"}
+
+    # Probe reports the true combined total across both streams (800 + 200).
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=fake_download, probe_fn=lambda url, referer: 1000
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # Exclude the orchestrator's own unconditional 100%-complete call
+    # (downloaded_size=None) issued after fake_download returns — it isn't
+    # from progress_hook, and its ordering after the hook's own calls is
+    # guaranteed by the explicit `await asyncio.sleep(0)` in download_entry.
+    hook_calls = [c for c in calls if c[1] is not None]
+    percents = [c[0] for c in hook_calls]
+    # Never drops below a previously-shown percent, unlike the old per-stream
+    # math (which would have gone 50% -> 100% -> 50% again for the audio pass).
+    assert percents == [40.0, 80.0, 90.0]
+    assert hook_calls[-1][1] == "900B"  # cumulative downloaded across both streams
+    assert hook_calls[-1][2] == "1000B"  # stays at the probed grand total throughout
+
+
+def test_progress_hook_falls_back_to_per_stream_percent_when_probe_unavailable():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+    ):
+        calls.append(percent)
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+        )
+
+    manager.update_progress = capturing_update_progress
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
+        time.sleep(0.26)
+        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 200})
+        return {"title": "Lesson 1"}
+
+    # No probe_fn injected — defaults to None, preserving prior behavior.
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # Last entry is the orchestrator's own unconditional 100%-complete call.
+    assert calls == [100.0, 50.0, 100.0]
+
+
+def test_progress_hook_falls_back_when_probe_fn_returns_none():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+    ):
+        calls.append(percent)
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+        )
+
+    manager.update_progress = capturing_update_progress
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 25, "total_bytes": 100})
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=fake_download, probe_fn=lambda url, referer: None
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # Last entry is the orchestrator's own unconditional 100%-complete call.
+    assert calls == [25.0, 100.0]
+
+
+def test_download_entry_invokes_probe_fn_with_url_and_referer():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    captured = {}
+
+    def probe_fn(url, referer):
+        captured["url"] = url
+        captured["referer"] = referer
+        return None
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download, probe_fn=probe_fn)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out", referer="https://school.com"))
+
+    assert captured == {"url": "https://vimeo.com/111", "referer": "https://school.com"}
 
 
 def test_download_all_never_exceeds_max_concurrency():
