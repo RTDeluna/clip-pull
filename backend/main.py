@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from background_tasks import track_task
 from downloader import DownloadOrchestrator, check_ffmpeg_available
 from history_routes import build_history_router
 from history_store import HistoryStore
@@ -28,11 +30,26 @@ history_store = HistoryStore(DB_PATH)
 settings_store = SettingsStore(DB_PATH)
 
 queue_manager = QueueManager(on_update=broadcaster.notify)
-orchestrator = DownloadOrchestrator(queue_manager)
+orchestrator = DownloadOrchestrator(
+    queue_manager,
+    get_max_concurrent=lambda: settings_store.get()["max_concurrent_downloads"],
+    get_fragment_concurrency=lambda: settings_store.get()["concurrent_fragment_downloads"],
+    get_aria2c_enabled=lambda: settings_store.get()["aria2c_enabled"],
+    record_history=lambda **kwargs: history_store.record(**kwargs),
+    on_batch_complete=lambda batch_id, summary: track_task(
+        asyncio.create_task(
+            connection_manager.broadcast(
+                {"type": "batch_complete", "batch_id": batch_id, "summary": summary}
+            )
+        )
+    ),
+)
 
 state = AppState()
 
-app.include_router(build_queue_router(queue_manager, orchestrator, state))
+app.include_router(
+    build_queue_router(queue_manager, orchestrator, history_store, settings_store, state)
+)
 app.include_router(build_history_router(history_store))
 app.include_router(build_settings_router(settings_store))
 
