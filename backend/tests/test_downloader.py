@@ -20,6 +20,7 @@ from downloader import (
     resolve_output_folder,
     resolve_use_aria2c,
     sanitize_filename,
+    stream_stage,
 )
 
 
@@ -39,6 +40,14 @@ def test_build_ydl_opts_includes_referer_header_when_provided():
 def test_build_ydl_opts_omits_referer_header_when_not_provided():
     opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
     assert "http_headers" not in opts
+
+
+def test_build_ydl_opts_registers_progress_hook_as_postprocessor_hook_too():
+    def hook(d):
+        pass
+
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, hook)
+    assert opts["postprocessor_hooks"] == [hook]
 
 
 def test_is_referer_blocked_error_detects_403():
@@ -169,6 +178,22 @@ def test_format_bytes_returns_zero_string_for_zero_bytes():
 
 def test_format_bytes_returns_none_for_missing_value():
     assert format_bytes(None) is None
+
+
+def test_stream_stage_returns_video_for_video_only_format():
+    assert stream_stage({"vcodec": "avc1", "acodec": "none"}) == "video"
+
+
+def test_stream_stage_returns_audio_for_audio_only_format():
+    assert stream_stage({"vcodec": "none", "acodec": "mp4a"}) == "audio"
+
+
+def test_stream_stage_returns_none_for_progressive_format():
+    assert stream_stage({"vcodec": "avc1", "acodec": "mp4a"}) is None
+
+
+def test_stream_stage_returns_none_when_codecs_missing():
+    assert stream_stage({}) is None
 
 
 def test_progress_hook_produces_clean_speed_and_integer_eta():
@@ -504,7 +529,7 @@ def test_progress_hook_computes_weighted_percent_across_two_streams_when_probe_a
     assert hook_calls[-1][2] == "1000B"  # stays at the probed grand total throughout
 
 
-def test_progress_hook_falls_back_to_per_stream_percent_when_probe_unavailable():
+def test_progress_hook_tracks_cumulative_percent_and_size_across_streams_when_probe_unavailable():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
 
@@ -514,7 +539,7 @@ def test_progress_hook_falls_back_to_per_stream_percent_when_probe_unavailable()
     def capturing_update_progress(
         entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
     ):
-        calls.append(percent)
+        calls.append((percent, downloaded_size, total_size))
         original_update_progress(
             entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
         )
@@ -522,17 +547,50 @@ def test_progress_hook_falls_back_to_per_stream_percent_when_probe_unavailable()
     manager.update_progress = capturing_update_progress
 
     def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        # Video stream completes at 800 of 800.
         progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
-        time.sleep(0.26)
+        time.sleep(0.26)  # clear the throttle window deterministically
+        # Audio stream starts — its own total (200) is much smaller than the
+        # video stream's. No probe_fn is injected, so there's no upfront
+        # grand total; this exercises the fallback path.
         progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 200})
         return {"title": "Lesson 1"}
 
-    # No probe_fn injected — defaults to None, preserving prior behavior.
     orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
     asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
 
-    # Last entry is the orchestrator's own unconditional 100%-complete call.
-    assert calls == [100.0, 50.0, 100.0]
+    hook_calls = [c for c in calls if c[1] is not None]
+    # Both downloaded and total climb across the stream transition — neither
+    # ever drops, unlike the old per-stream math (which reported 50.0% of
+    # "200B" total right after reporting 100.0% of "800B").
+    assert hook_calls == [
+        (100.0, "800B", "800B"),
+        (90.0, "900B", "1000B"),
+    ]
+
+
+def test_download_entry_records_correct_combined_size_in_history_across_streams():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    recorded = []
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        # Video stream completes, then a much-smaller audio stream starts —
+        # no probe_fn, so History must still record the combined size, not
+        # just the last (audio) stream's own total.
+        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
+        time.sleep(0.26)
+        progress_hook({"status": "downloading", "downloaded_bytes": 200, "total_bytes": 200})
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(
+        manager,
+        download_fn=fake_download,
+        record_history=lambda **kwargs: recorded.append(kwargs),
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert recorded[0]["total_size"] == "1000B"
 
 
 def test_progress_hook_falls_back_when_probe_fn_returns_none():
@@ -563,6 +621,66 @@ def test_progress_hook_falls_back_when_probe_fn_returns_none():
 
     # Last entry is the orchestrator's own unconditional 100%-complete call.
     assert calls == [25.0, 100.0]
+
+
+def test_progress_hook_reports_video_then_audio_stage_across_stream_transition():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    stages = []
+    original_set_stage = manager.set_stage
+
+    def capturing_set_stage(entry_id, stage):
+        stages.append(stage)
+        original_set_stage(entry_id, stage)
+
+    manager.set_stage = capturing_set_stage
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({
+            "status": "downloading",
+            "downloaded_bytes": 400,
+            "total_bytes": 800,
+            "info_dict": {"vcodec": "avc1", "acodec": "none"},
+        })
+        time.sleep(0.26)  # clear the throttle window deterministically
+        progress_hook({
+            "status": "downloading",
+            "downloaded_bytes": 100,
+            "total_bytes": 200,
+            "info_dict": {"vcodec": "none", "acodec": "mp4a"},
+        })
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # video -> audio -> cleared on completion.
+    assert stages == ["video", "audio", None]
+
+
+def test_progress_hook_reports_merging_stage_on_postprocessor_start():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    stages = []
+    original_set_stage = manager.set_stage
+
+    def capturing_set_stage(entry_id, stage):
+        stages.append(stage)
+        original_set_stage(entry_id, stage)
+
+    manager.set_stage = capturing_set_stage
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 100})
+        progress_hook({"status": "started", "postprocessor": "Merger"})
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert stages == ["merging", None]
 
 
 def test_download_entry_invokes_probe_fn_with_url_and_referer():

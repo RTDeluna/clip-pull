@@ -77,6 +77,22 @@ def format_bytes(num_bytes: Optional[float]) -> Optional[str]:
     return f"{value:.1f}TB"
 
 
+def stream_stage(info_dict: dict) -> Optional[str]:
+    """Labels which half of a split video+audio download is currently in
+    progress, from yt-dlp's per-format info_dict passed into progress_hook.
+    None for an ordinary single-stream (progressive) format, where there's
+    nothing to label."""
+    vcodec = info_dict.get("vcodec")
+    acodec = info_dict.get("acodec")
+    has_video = bool(vcodec) and vcodec != "none"
+    has_audio = bool(acodec) and acodec != "none"
+    if has_video and not has_audio:
+        return "video"
+    if has_audio and not has_video:
+        return "audio"
+    return None
+
+
 def is_referer_blocked_error(exc: Exception) -> bool:
     return "403" in str(exc)
 
@@ -134,6 +150,7 @@ def build_ydl_opts(
         "outtmpl": output_template,
         "concurrent_fragment_downloads": concurrent_fragment_downloads,
         "progress_hooks": [progress_hook],
+        "postprocessor_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
     }
@@ -283,6 +300,7 @@ class DownloadOrchestrator:
             smoothed_speed: Optional[float] = None
             prior_streams_bytes = 0
             last_stream_total: Optional[int] = None
+            last_stage: Optional[str] = None
 
             # Best-effort lookahead so a download with separate video+audio
             # streams shows one continuously-climbing percentage across both,
@@ -295,9 +313,21 @@ class DownloadOrchestrator:
                 expected_total_bytes = await loop.run_in_executor(None, self.probe_fn, url, referer)
 
             def progress_hook(d: dict) -> None:
-                nonlocal last_progress_time, smoothed_speed, prior_streams_bytes, last_stream_total
+                nonlocal last_progress_time, smoothed_speed, prior_streams_bytes, last_stream_total, last_stage
                 if entry_id in self._pause_requested:
                     raise DownloadPaused()
+
+                # Registered as both a progress_hooks and postprocessor_hooks
+                # callback (see build_ydl_opts) — this branch handles the
+                # latter, which fires with a completely different dict shape
+                # (no downloaded_bytes/total_bytes) when ffmpeg starts
+                # merging the finished video+audio streams.
+                if d.get("postprocessor") == "Merger" and d.get("status") == "started":
+                    if last_stage != "merging":
+                        last_stage = "merging"
+                        loop.call_soon_threadsafe(self.queue_manager.set_stage, entry_id, "merging")
+                    return
+
                 if d.get("status") != "downloading":
                     return
                 now = time.monotonic()
@@ -316,19 +346,32 @@ class DownloadOrchestrator:
                         prior_streams_bytes += last_stream_total
                     last_stream_total = total
 
-                if expected_total_bytes and downloaded is not None:
-                    overall_downloaded = prior_streams_bytes + downloaded
-                    percent = round(min(overall_downloaded / expected_total_bytes, 1.0) * 100, 1)
-                    downloaded_size = format_bytes(overall_downloaded)
-                    total_size = format_bytes(expected_total_bytes)
+                # downloaded/total are always folded onto prior_streams_bytes,
+                # whether or not the upfront probe knew the true grand total —
+                # this keeps both numbers climbing across a stream transition
+                # instead of snapping down to just the new (much smaller)
+                # stream's own numbers, which used to read as a "reset."
+                overall_downloaded = (
+                    prior_streams_bytes + downloaded if downloaded is not None else None
+                )
+                if expected_total_bytes:
+                    overall_total = expected_total_bytes
+                elif total is not None:
+                    overall_total = prior_streams_bytes + total
                 else:
-                    percent = (
-                        round((downloaded / total) * 100, 1)
-                        if downloaded is not None and total
-                        else 0.0
-                    )
-                    downloaded_size = format_bytes(downloaded)
-                    total_size = format_bytes(total)
+                    overall_total = None
+
+                if overall_downloaded is not None and overall_total:
+                    percent = round(min(overall_downloaded / overall_total, 1.0) * 100, 1)
+                else:
+                    percent = 0.0
+                downloaded_size = format_bytes(overall_downloaded)
+                total_size = format_bytes(overall_total)
+
+                stage = stream_stage(d.get("info_dict") or {})
+                if stage != last_stage:
+                    last_stage = stage
+                    loop.call_soon_threadsafe(self.queue_manager.set_stage, entry_id, stage)
 
                 # yt-dlp's raw per-chunk speed swings wildly between calls
                 # (fragment boundaries, brief network hiccups) even when the
@@ -379,6 +422,7 @@ class DownloadOrchestrator:
 
                 if title:
                     self.queue_manager.set_title(entry_id, title)
+                self.queue_manager.set_stage(entry_id, None)
                 self.queue_manager.update_progress(entry_id, 100.0, None, 0)
                 self.queue_manager.set_status(entry_id, "done")
                 # History recording is a side-channel (e.g. SQLite write) that
