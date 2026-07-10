@@ -1,0 +1,38 @@
+---
+interface Props {
+  href?: string;
+  variant?: "primary" | "ghost";
+  class?: string;
+  disabled?: boolean;
+  ariaLabel?: string;
+}
+const {
+  href,
+  variant = "primary",
+  class: className = "",
+  disabled = false,
+  ariaLabel,
+} = Astro.props;
+
+const base =
+  "relative overflow-hidden inline-flex items-center justify-center gap-2 rounded-control px-5 py-2.5 text-sm font-semibold transition-[transform,box-shadow,background-color,border-color,color] duration-150 [transition-timing-function:var(--ease)] active:scale-[0.97]";
+const variants = {
+  primary:
+    "gradient-accent text-on-accent shadow-[0_6px_20px_rgba(99,102,241,0.35)] hover:shadow-[0_8px_26px_rgba(99,102,241,0.48)] hover:-translate-y-px",
+  ghost:
+    "glass-strong border border-glass-border text-text hover:border-accent",
+};
+const disabledClasses = disabled
+  ? "opacity-45 cursor-not-allowed pointer-events-none"
+  : "cursor-pointer";
+const Tag = href ? "a" : "button";
+---
+<Tag
+  href={href}
+  disabled={!href && disabled ? true : undefined}
+  aria-label={ariaLabel}
+  data-ripple
+  class:list={[base, variants[variant], disabledClasses, className]}
+>
+  <slot />
+</Tag>

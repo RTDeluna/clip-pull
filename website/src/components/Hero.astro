@@ -1,0 +1,42 @@
+---
+import { Image } from "astro:assets";
+import DownloadButton from "./DownloadButton.astro";
+import IconShield from "../icons/IconShield.astro";
+import dashboardScreenshot from "../assets/dashboard-hero.png";
+---
+<section class="relative pt-16 pb-20 sm:pt-24 sm:pb-28 px-5 sm:px-8">
+  <div class="mx-auto max-w-4xl text-center reveal">
+    <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight leading-[1.05] text-text">
+      Paste links.<br />
+      Pick a folder.<br />
+      <span class="gradient-text">Walk away.</span>
+    </h1>
+    <p class="mt-6 text-base sm:text-xl text-text-dim leading-relaxed max-w-2xl mx-auto">
+      CLIP.PULL downloads course and lesson videos in parallel — Vimeo, Loom, and anything
+      else <span class="font-mono text-sm sm:text-base">yt-dlp</span> supports — while you do
+      something else.
+    </p>
+
+    <div class="mt-9 flex flex-col sm:flex-row items-center justify-center gap-3">
+      <DownloadButton platform="windows" />
+      <DownloadButton platform="macos" />
+    </div>
+
+    <p class="mt-5 flex items-center justify-center gap-2 text-xs font-semibold text-text-dim">
+      <IconShield class="w-4 h-4 text-accent" />
+      Free. 100% local — no account, no cloud.
+    </p>
+  </div>
+
+  <div class="reveal mt-16 mx-auto max-w-5xl">
+    <div class="glass rounded-panel p-2 sm:p-3 shadow-2xl">
+      <Image
+        src={dashboardScreenshot}
+        alt="Screenshot of the CLIP.PULL desktop app's Queue view, with a batch of Vimeo and Loom links pasted in and ready to download to a chosen folder"
+        widths={[640, 1000, 1400, 1915]}
+        sizes="(min-width: 1024px) 1000px, 90vw"
+        class="w-full h-auto rounded-[calc(var(--radius-lg)-6px)] border border-glass-border"
+      />
+    </div>
+  </div>
+</section>

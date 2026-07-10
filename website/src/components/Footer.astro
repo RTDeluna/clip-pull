@@ -1,0 +1,24 @@
+---
+import { appVersion } from "../data/downloads.config";
+const year = 2026;
+---
+<footer class="px-5 sm:px-8 py-10 border-t border-glass-border">
+  <div class="mx-auto max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4">
+    <div class="text-center sm:text-left">
+      <p class="text-sm font-extrabold tracking-wide uppercase">
+        CLIP<span class="gradient-text">.PULL</span>
+      </p>
+      <p class="text-xs text-text-dim mt-1">Paste links. Pick a folder. Walk away.</p>
+    </div>
+
+    <div class="flex items-center gap-6 text-xs font-semibold text-text-dim">
+      <a href="#features" class="hover:text-text transition-colors">Features</a>
+      <a href="#how-it-works" class="hover:text-text transition-colors">How it Works</a>
+      <a href="#download" class="hover:text-text transition-colors">Download</a>
+    </div>
+
+    <p class="text-xs font-mono text-text-dim">
+      v{appVersion} · © {year} CLIP.PULL
+    </p>
+  </div>
+</footer>

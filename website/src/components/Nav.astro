@@ -1,0 +1,75 @@
+---
+import DownloadButton from "./DownloadButton.astro";
+import IconSun from "../icons/IconSun.astro";
+import IconMoon from "../icons/IconMoon.astro";
+import IconMenu from "../icons/IconMenu.astro";
+import IconClose from "../icons/IconClose.astro";
+
+const links = [
+  { href: "#features", label: "Features" },
+  { href: "#how-it-works", label: "How it Works" },
+  { href: "#download", label: "Download" },
+];
+---
+<nav class="glass sticky top-0 z-50 border-x-0 border-t-0 rounded-none">
+  <div class="mx-auto max-w-6xl px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
+    <a href="/" class="text-xl font-extrabold tracking-wide uppercase shrink-0">
+      CLIP<span class="gradient-text">.PULL</span>
+    </a>
+
+    <div class="hidden lg:flex items-center gap-7">
+      {links.map((link) => (
+        <a
+          href={link.href}
+          class="text-sm font-semibold text-text-dim hover:text-text transition-colors duration-150"
+        >
+          {link.label}
+        </a>
+      ))}
+    </div>
+
+    <div class="hidden lg:flex items-center gap-3">
+      <DownloadButton platform="windows" size="sm" />
+      <DownloadButton platform="macos" size="sm" />
+      <button
+        id="theme-toggle"
+        type="button"
+        aria-label="Toggle light and dark mode"
+        data-ripple
+        class="relative overflow-hidden grid place-items-center w-9 h-9 shrink-0 rounded-full glass border border-glass-border text-text cursor-pointer transition-transform duration-150 [transition-timing-function:var(--ease)] hover:rotate-12 active:scale-90"
+      >
+        <IconSun class="theme-icon-sun w-[18px] h-[18px]" />
+        <IconMoon class="theme-icon-moon w-[18px] h-[18px] absolute" />
+      </button>
+    </div>
+
+    <button
+      id="nav-toggle"
+      type="button"
+      aria-label="Open menu"
+      aria-expanded="false"
+      data-ripple
+      class="relative overflow-hidden lg:hidden grid place-items-center w-10 h-10 rounded-control glass border border-glass-border text-text cursor-pointer"
+    >
+      <IconMenu class="nav-toggle-icon-menu w-5 h-5" />
+      <IconClose class="nav-toggle-icon-close w-5 h-5 absolute" />
+    </button>
+  </div>
+
+  <div
+    id="nav-sheet"
+    class="lg:hidden glass border-t border-glass-border max-h-0 overflow-hidden transition-[max-height] duration-300 [transition-timing-function:var(--ease)] [&.is-open]:max-h-96"
+  >
+    <div class="px-5 sm:px-8 py-5 flex flex-col gap-4">
+      {links.map((link) => (
+        <a href={link.href} class="text-sm font-semibold text-text-dim hover:text-text">
+          {link.label}
+        </a>
+      ))}
+      <div class="flex gap-3 pt-2">
+        <DownloadButton platform="windows" size="sm" class="flex-1 justify-center" />
+        <DownloadButton platform="macos" size="sm" class="flex-1 justify-center" />
+      </div>
+    </div>
+  </div>
+</nav>

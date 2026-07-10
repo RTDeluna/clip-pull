@@ -1,0 +1,45 @@
+---
+import SectionHeading from "./SectionHeading.astro";
+import IconClipboard from "../icons/IconClipboard.astro";
+import IconFolder from "../icons/IconFolder.astro";
+import IconCheckCircle from "../icons/IconCheckCircle.astro";
+
+const steps = [
+  {
+    icon: IconClipboard,
+    title: "Paste",
+    body: "Drop in a batch of links — or let the browser extension add them for you automatically.",
+  },
+  {
+    icon: IconFolder,
+    title: "Pick",
+    body: "Name a folder for the course or batch once. CLIP.PULL keeps everything organized inside it.",
+  },
+  {
+    icon: IconCheckCircle,
+    title: "Walk away",
+    body: "Downloads run in parallel with live progress. You'll get a notification the moment it's done.",
+  },
+];
+---
+<section id="how-it-works" class="px-5 sm:px-8 py-16 sm:py-24">
+  <div class="mx-auto max-w-6xl">
+    <SectionHeading eyebrow="How it Works" title="Three steps. That's it." />
+
+    <div class="mt-14 grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-4 relative">
+      <div
+        class="hidden sm:block absolute top-7 left-[16.5%] right-[16.5%] h-px gradient-accent opacity-40"
+        aria-hidden="true"
+      ></div>
+      {steps.map((step, index) => (
+        <div class="reveal relative text-center flex flex-col items-center gap-4" style={`transition-delay:${index * 100}ms`}>
+          <div class="relative z-10 w-14 h-14 rounded-full gradient-accent grid place-items-center shadow-[0_4px_14px_rgba(99,102,241,0.35)]">
+            <step.icon class="w-6 h-6 text-on-accent" />
+          </div>
+          <h3 class="text-xl font-bold text-text">{step.title}</h3>
+          <p class="text-sm text-text-dim leading-relaxed max-w-xs">{step.body}</p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

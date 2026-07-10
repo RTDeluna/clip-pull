@@ -1,0 +1,273 @@
+@import "tailwindcss";
+@import "@fontsource-variable/manrope";
+@import "@fontsource/cascadia-code";
+
+/* ---------------------------------------------------------------------
+   Design tokens — ported value-for-value from the desktop app's
+   frontend/styles.css so the site and the product read as one brand.
+   --------------------------------------------------------------------- */
+
+:root {
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+  --font-display: "Manrope Variable", "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a10;
+  --blob-1: rgba(99, 102, 241, 0.38);
+  --blob-2: rgba(139, 92, 246, 0.3);
+  --blob-3: rgba(56, 189, 248, 0.14);
+
+  --text: #f2f2f7;
+  --text-dim: #9b9bb3;
+
+  --accent: #8b8ff9;
+  --accent-2: #b09bfa;
+  --accent-strong: #6366f1;
+  --accent-strong-2: #8b5cf6;
+  --on-accent: #ffffff;
+
+  --glass-bg: rgba(255, 255, 255, 0.055);
+  --glass-bg-strong: rgba(255, 255, 255, 0.09);
+  --glass-bg-hover: rgba(255, 255, 255, 0.1);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --input-bg: rgba(0, 0, 0, 0.22);
+
+  --error: #fb7185;
+  --error-bg: rgba(251, 113, 133, 0.12);
+  --error-border: rgba(251, 113, 133, 0.32);
+  --success: #4ade80;
+  --success-bg: rgba(74, 222, 128, 0.12);
+
+  --ring: rgba(139, 143, 249, 0.45);
+  --blur: 22px;
+}
+
+:root[data-theme="light"] {
+  --bg: #f3f3fb;
+  --blob-1: rgba(99, 102, 241, 0.22);
+  --blob-2: rgba(139, 92, 246, 0.18);
+  --blob-3: rgba(56, 189, 248, 0.16);
+
+  --text: #1c1b2e;
+  --text-dim: #6b6b85;
+
+  --accent: #5457e5;
+  --accent-2: #7c3aed;
+  --accent-strong: #4f46e5;
+  --accent-strong-2: #7c3aed;
+  --on-accent: #ffffff;
+
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.72);
+  --glass-bg-hover: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(28, 27, 46, 0.08);
+  --glass-shadow: 0 8px 30px rgba(76, 70, 150, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  --input-bg: rgba(255, 255, 255, 0.55);
+
+  --error: #dc2626;
+  --error-bg: rgba(220, 38, 38, 0.08);
+  --error-border: rgba(220, 38, 38, 0.25);
+  --success: #16a34a;
+  --success-bg: rgba(22, 163, 74, 0.1);
+
+  --ring: rgba(84, 87, 229, 0.3);
+  --blur: 18px;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-text: var(--text);
+  --color-text-dim: var(--text-dim);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-strong-2: var(--accent-strong-2);
+  --color-on-accent: var(--on-accent);
+  --color-glass-border: var(--glass-border);
+  --color-error: var(--error);
+  --color-success: var(--success);
+
+  --radius-control: var(--radius-sm);
+  --radius-card: var(--radius-md);
+  --radius-panel: var(--radius-lg);
+  --radius-pill: var(--radius-pill);
+
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  color-scheme: dark light;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-display);
+  position: relative;
+  overflow-x: hidden;
+  transition: background-color 220ms var(--ease), color 220ms var(--ease);
+}
+
+/* Ambient background gradient blobs — identical recipe to the app's body::before */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 32% at 12% 8%, var(--blob-1), transparent 65%),
+    radial-gradient(42% 38% at 90% 12%, var(--blob-2), transparent 65%),
+    radial-gradient(48% 42% at 50% 100%, var(--blob-3), transparent 70%);
+  filter: blur(70px);
+  transition: background 300ms var(--ease);
+}
+
+::selection {
+  background: var(--accent-strong);
+  color: var(--on-accent);
+}
+
+.theme-icon-sun,
+.theme-icon-moon {
+  display: none;
+}
+:root[data-theme="dark"] .theme-icon-moon {
+  display: block;
+}
+:root[data-theme="light"] .theme-icon-sun {
+  display: block;
+}
+
+.nav-toggle-icon-close {
+  display: none;
+}
+#nav-toggle[aria-expanded="true"] .nav-toggle-icon-menu {
+  display: none;
+}
+#nav-toggle[aria-expanded="true"] .nav-toggle-icon-close {
+  display: block;
+}
+
+/* ---------------------------------------------------------------------
+   Shared component-level utilities
+   --------------------------------------------------------------------- */
+
+@layer components {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--blur)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+  }
+
+  .glass-strong {
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(var(--blur)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+  }
+
+  .gradient-accent {
+    background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent-strong-2) 100%);
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Default look for a real ("available") download link: primary gradient. */
+  [data-download-btn][data-state="available"] {
+    background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent-strong-2) 100%);
+    color: var(--on-accent);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35);
+  }
+  [data-download-btn][data-state="available"]:hover {
+    box-shadow: 0 8px 26px rgba(99, 102, 241, 0.48);
+    transform: translateY(-1px);
+  }
+
+  /* Once real links exist, de-emphasize whichever platform doesn't match
+     the visitor's detected OS (set on <html data-os> before first paint —
+     see the inline script in Layout.astro) so the matching one reads as
+     the primary CTA. */
+  html[data-os="macos"] [data-download-btn][data-platform="windows"][data-state="available"],
+  html:not([data-os="macos"]) [data-download-btn][data-platform="macos"][data-state="available"] {
+    background: var(--glass-bg-strong);
+    color: var(--text);
+    box-shadow: none;
+    border: 1px solid var(--glass-border);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Motion — reused verbatim from the app's own keyframes
+   --------------------------------------------------------------------- */
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.28;
+  transform: scale(0);
+  pointer-events: none;
+  animation: ripple-expand 600ms var(--ease) forwards;
+}
+@keyframes ripple-expand {
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(16px) scale(0.985);
+  transition: opacity 480ms var(--ease), transform 480ms var(--ease);
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+@keyframes shimmer-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  transform: translateX(-100%);
+  animation: shimmer-sweep 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ripple,
+  .shimmer::after {
+    animation: none;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

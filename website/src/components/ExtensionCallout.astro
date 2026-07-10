@@ -1,0 +1,34 @@
+---
+import IconArrowRight from "../icons/IconArrowRight.astro";
+---
+<section class="px-5 sm:px-8 py-16 sm:py-24">
+  <div class="reveal mx-auto max-w-4xl glass rounded-panel p-8 sm:p-10 flex flex-col sm:flex-row items-center gap-8">
+    <img
+      src="/extension-icon.png"
+      alt=""
+      aria-hidden="true"
+      width="72"
+      height="72"
+      class="w-16 h-16 sm:w-[72px] sm:h-[72px] rounded-card shrink-0 shadow-[var(--glass-shadow)]"
+    />
+    <div class="flex-1 text-center sm:text-left">
+      <p class="text-xs font-semibold uppercase tracking-[0.14em] text-accent-strong mb-2 font-mono">
+        Browser Extension
+      </p>
+      <h3 class="text-xl font-bold text-text mb-2">Skool Video Downloader</h3>
+      <p class="text-sm text-text-dim leading-relaxed">
+        One click on a Skool lesson page sends the video straight into CLIP.PULL's queue —
+        no copy-pasting links. Works on Skool, Loom, Vimeo, YouTube, Wistia, and Bunny Stream
+        embeds too.
+      </p>
+    </div>
+    <a
+      href="/skool-video-downloader.zip"
+      data-ripple
+      class="relative overflow-hidden shrink-0 inline-flex items-center gap-2 rounded-control glass-strong border border-glass-border px-5 py-2.5 text-sm font-semibold text-text cursor-pointer transition-transform duration-150 [transition-timing-function:var(--ease)] hover:border-accent active:scale-[0.97]"
+    >
+      Download extension
+      <IconArrowRight class="w-4 h-4" />
+    </a>
+  </div>
+</section>

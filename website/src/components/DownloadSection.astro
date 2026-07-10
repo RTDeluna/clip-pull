@@ -1,0 +1,48 @@
+---
+import SectionHeading from "./SectionHeading.astro";
+import DownloadButton from "./DownloadButton.astro";
+import IconWindows from "../icons/IconWindows.astro";
+import IconApple from "../icons/IconApple.astro";
+import { downloads, appVersion } from "../data/downloads.config";
+
+const platforms = [
+  { key: "windows" as const, label: "Windows", icon: IconWindows },
+  { key: "macos" as const, label: "macOS", icon: IconApple },
+];
+---
+<section id="download" class="px-5 sm:px-8 py-16 sm:py-24">
+  <div class="mx-auto max-w-4xl">
+    <SectionHeading
+      eyebrow="Download"
+      title="Get CLIP.PULL"
+      subtitle="Free. No account required. Your files never leave your computer."
+    />
+
+    <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-5">
+      {platforms.map(({ key, label, icon: Icon }) => {
+        const info = downloads[key];
+        return (
+          <div class="reveal glass rounded-panel p-7 flex flex-col items-center text-center gap-4">
+            <div class="w-14 h-14 rounded-card glass-strong border border-glass-border grid place-items-center">
+              <Icon class="w-7 h-7 text-text" />
+            </div>
+            <h3 class="text-lg font-bold text-text">{label}</h3>
+            <p class="text-xs text-text-dim font-mono">{info.minOsVersion}</p>
+            {info.state === "available" && (
+              <p class="text-xs text-text-dim font-mono">
+                v{info.version} {info.fileSizeMb ? `· ~${info.fileSizeMb} MB` : ""}
+              </p>
+            )}
+            <DownloadButton platform={key} class="mt-2 w-full justify-center" />
+          </div>
+        );
+      })}
+    </div>
+
+    <p class="reveal mt-8 text-center text-xs text-text-dim max-w-lg mx-auto leading-relaxed">
+      CLIP.PULL v{appVersion} is unsigned. Windows may show a SmartScreen warning on first
+      launch — this is expected for an indie app without a paid developer certificate. macOS
+      support is coming soon.
+    </p>
+  </div>
+</section>

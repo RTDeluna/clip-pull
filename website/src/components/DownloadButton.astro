@@ -1,0 +1,52 @@
+---
+import { downloads } from "../data/downloads.config";
+import IconWindows from "../icons/IconWindows.astro";
+import IconApple from "../icons/IconApple.astro";
+import IconDownload from "../icons/IconDownload.astro";
+
+interface Props {
+  platform: "windows" | "macos";
+  size?: "sm" | "md";
+  class?: string;
+}
+const { platform, size = "md", class: className = "" } = Astro.props;
+const info = downloads[platform];
+const label = platform === "windows" ? "Windows" : "macOS";
+const Icon = platform === "windows" ? IconWindows : IconApple;
+const sizeClasses =
+  size === "sm" ? "px-4 py-2 text-xs" : "px-5 py-2.5 text-sm";
+const base =
+  "relative overflow-hidden inline-flex items-center gap-2 rounded-control font-semibold whitespace-nowrap transition-[transform,box-shadow,background-color,border-color,color] duration-150 [transition-timing-function:var(--ease)]";
+---
+{
+  info.state === "available" ? (
+    <a
+      href={info.url}
+      data-ripple
+      data-download-btn
+      data-platform={platform}
+      data-state="available"
+      class:list={[base, sizeClasses, "cursor-pointer active:scale-[0.97]", className]}
+    >
+      <Icon class="w-4 h-4 shrink-0" />
+      <span>Download for {label}</span>
+      <IconDownload class="w-4 h-4 shrink-0" />
+    </a>
+  ) : (
+    <span
+      data-download-btn
+      data-platform={platform}
+      data-state="coming-soon"
+      aria-disabled="true"
+      class:list={[
+        base,
+        sizeClasses,
+        "glass-strong border border-glass-border text-text-dim opacity-70 cursor-not-allowed",
+        className,
+      ]}
+    >
+      <Icon class="w-4 h-4 shrink-0" />
+      <span>{label} — Coming Soon</span>
+    </span>
+  )
+}

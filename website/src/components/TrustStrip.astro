@@ -1,0 +1,21 @@
+---
+import IconShield from "../icons/IconShield.astro";
+import IconLock from "../icons/IconLock.astro";
+import IconMonitor from "../icons/IconMonitor.astro";
+
+const items = [
+  { icon: IconShield, label: "Runs 100% locally" },
+  { icon: IconLock, label: "No account, no subscription" },
+  { icon: IconMonitor, label: "Windows & macOS" },
+];
+---
+<section class="px-5 sm:px-8 pb-16 sm:pb-20">
+  <div class="reveal mx-auto max-w-4xl flex flex-wrap items-center justify-center gap-3 sm:gap-4">
+    {items.map(({ icon: Icon, label }) => (
+      <div class="glass rounded-pill px-4 py-2 flex items-center gap-2 text-sm font-semibold text-text-dim">
+        <Icon class="w-4 h-4 text-accent shrink-0" />
+        {label}
+      </div>
+    ))}
+  </div>
+</section>

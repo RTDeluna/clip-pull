@@ -1,0 +1,56 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+const {
+  title = "CLIP.PULL — Paste links. Pick a folder. Walk away.",
+  description = "CLIP.PULL downloads course and lesson videos in parallel — Vimeo, Loom, and anything yt-dlp supports — while you do something else. Free, local, no account required.",
+} = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+
+    <script is:inline>
+      // Runs synchronously, before first paint — no flash of the wrong
+      // theme or the wrong default download emphasis. Mirrors the exact
+      // pattern (and localStorage key) used by the desktop app itself.
+      (function () {
+        var STORAGE_KEY = "clippull-theme";
+        var theme = "dark";
+        try {
+          theme =
+            localStorage.getItem(STORAGE_KEY) ||
+            (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+        } catch (e) {
+          // localStorage unavailable — fall back to dark.
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+
+        var ua = navigator.userAgent || "";
+        var os = "other";
+        if (/Mac OS X|Macintosh/i.test(ua)) os = "macos";
+        else if (/Windows/i.test(ua)) os = "windows";
+        document.documentElement.setAttribute("data-os", os);
+      })();
+    </script>
+  </head>
+  <body class="font-display text-text">
+    <slot />
+    <script src="../scripts/main.ts"></script>
+  </body>
+</html>
