@@ -1,12 +1,43 @@
 {
-  "name": "vimeo-course-downloader",
+  "name": "clippull-video-downloader",
   "version": "1.0.0",
   "description": "Paste Vimeo links, download them in parallel with live progress bars.",
   "main": "main.js",
+  "author": "CLIP.PULL",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build:backend": "cd backend && python -m PyInstaller --onefile --name clippull-backend --distpath dist --workpath build --specpath . main.py",
+    "build:extension": "powershell -ExecutionPolicy Bypass -File scripts/build-extension.ps1",
+    "dist": "npm run build:backend && npm run build:extension && electron-builder"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.clippull.downloader",
+    "productName": "CLIP.PULL",
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "frontend/**/*",
+      "assets/**/*",
+      "backend/dist/clippull-backend*"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": ["zip"],
+      "icon": "assets/icon.icns",
+      "identity": null,
+      "category": "public.app-category.utilities"
+    },
+    "directories": {
+      "output": "dist"
+    }
   }
 }

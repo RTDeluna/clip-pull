@@ -646,7 +646,9 @@ input[type="checkbox"] {
   height: 100%;
   width: 0%;
   border-radius: var(--radius-pill);
-  transition: width 0.35s var(--ease);
+  /* Width is eased continuously frame-by-frame in JS (renderer.js), not via
+     CSS transition — a transition here would fight the per-frame updates
+     and produce laggy, mushy motion instead of smooth motion. */
 }
 
 /* A soft highlight sweeps across the bar while a download is actively in flight. */

@@ -1,0 +1,15 @@
+# OS / editor junk — never ship these in the extension package
+.DS_Store
+**/.DS_Store
+desktop.ini
+**/desktop.ini
+Thumbs.db
+*.log
+
+# Build output
+*.zip
+dist/
+
+# Signing keys / packed extensions — never commit these
+*.pem
+*.crx

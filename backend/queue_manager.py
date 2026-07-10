@@ -40,10 +40,15 @@ class QueueEntry:
 
 
 class QueueManager:
-    def __init__(self, on_update: Optional[Callable[[dict], None]] = None):
+    def __init__(
+        self,
+        on_update: Optional[Callable[[dict], None]] = None,
+        on_remove: Optional[Callable[[str], None]] = None,
+    ):
         self._entries: dict[str, QueueEntry] = {}
         self._order: list[str] = []
         self.on_update = on_update
+        self.on_remove = on_remove
 
     def _notify(self, entry: QueueEntry) -> None:
         if self.on_update:
@@ -57,8 +62,15 @@ class QueueManager:
         previously_downloaded_urls: Optional[set[str]] = None,
     ) -> list[QueueEntry]:
         previously_downloaded_urls = previously_downloaded_urls or set()
+        # Skip URLs that already have an active (not yet done/error) entry —
+        # protects against duplicate rows from double-submits, whether from
+        # the desktop UI or an external caller like the browser extension
+        # re-sending the same link.
+        active_urls = {e.url for e in self._entries.values() if e.status not in ("done", "error")}
         created = []
         for url in urls:
+            if url in active_urls:
+                continue
             entry = QueueEntry(
                 id=uuid.uuid4().hex,
                 url=url,
@@ -69,6 +81,7 @@ class QueueManager:
             self._entries[entry.id] = entry
             self._order.append(entry.id)
             created.append(entry)
+            active_urls.add(url)
             self._notify(entry)
         return created
 
@@ -126,6 +139,16 @@ class QueueManager:
         entry.error_reason = reason
         self._notify(entry)
 
+    def mark_paused(self, entry_id: str) -> None:
+        """Sets status to "paused" without touching percent/downloaded/total
+        size — unlike reset_for_retry, a paused download should resume from
+        where it left off, not restart at 0%."""
+        entry = self._entries[entry_id]
+        entry.status = "paused"
+        entry.speed = None
+        entry.eta = None
+        self._notify(entry)
+
     def reset_for_retry(self, entry_id: str) -> None:
         entry = self._entries[entry_id]
         entry.status = "queued"
@@ -143,3 +166,11 @@ class QueueManager:
 
     def to_list(self) -> list[dict]:
         return [self._entries[eid].to_dict() for eid in self._order]
+
+    def remove(self, entry_id: str) -> None:
+        if entry_id in self._entries:
+            del self._entries[entry_id]
+        if entry_id in self._order:
+            self._order.remove(entry_id)
+        if self.on_remove:
+            self.on_remove(entry_id)

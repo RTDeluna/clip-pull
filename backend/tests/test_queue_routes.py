@@ -74,34 +74,6 @@ def test_get_queue_returns_current_entries():
     assert "https://vimeo.com/333" in urls
 
 
-def test_clear_finished_removes_only_done_and_error_entries():
-    client, queue_manager, _, _, _ = _make_client()
-    first = client.post(
-        "/queue", json={"urls_text": "https://vimeo.com/1", "output_folder": "C:/downloads"}
-    )
-    second = client.post(
-        "/queue", json={"urls_text": "https://vimeo.com/2", "output_folder": "C:/downloads"}
-    )
-    done_id = first.json()["entries"][0]["id"]
-    queued_id = second.json()["entries"][0]["id"]
-    queue_manager.set_status(done_id, "done")
-
-    response = client.delete("/queue/finished")
-    assert response.status_code == 200
-    assert response.json()["removed"] == [done_id]
-
-    remaining_ids = {e["url"] for e in client.get("/queue").json()["entries"]}
-    assert remaining_ids == {"https://vimeo.com/2"}
-    assert queue_manager.get(queued_id).status == "queued"
-
-
-def test_clear_finished_returns_empty_list_when_nothing_to_clear():
-    client, _, _, _, _ = _make_client()
-    response = client.delete("/queue/finished")
-    assert response.status_code == 200
-    assert response.json()["removed"] == []
-
-
 def test_retry_entry_resets_status_to_queued():
     client, queue_manager, _, _, _ = _make_client()
     post_response = client.post(
@@ -113,6 +85,78 @@ def test_retry_entry_resets_status_to_queued():
     response = client.post(f"/queue/{entry_id}/retry", json={})
     assert response.status_code == 202
     assert response.json()["entry"]["status"] == "queued"
+
+
+def test_pause_entry_flags_the_active_download_for_cancellation():
+    client, queue_manager, orchestrator, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/555", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.set_status(entry_id, "downloading")
+
+    class FakeTask:
+        def done(self):
+            return False
+
+    orchestrator._active_tasks[entry_id] = FakeTask()
+
+    response = client.post(f"/queue/{entry_id}/pause")
+    assert response.status_code == 202
+    assert entry_id in orchestrator._pause_requested
+
+
+def test_pause_entry_is_a_no_op_when_nothing_is_actively_downloading():
+    client, _, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/556", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+
+    response = client.post(f"/queue/{entry_id}/pause")
+    assert response.status_code == 202
+    assert response.json()["entry"]["status"] == "queued"
+
+
+def test_resume_entry_triggers_a_new_download_using_the_entrys_output_folder():
+    client, queue_manager, orchestrator, _, _ = _make_client()
+
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/557", "output_folder": "C:/folder-a"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.mark_paused(entry_id)
+
+    calls = []
+
+    async def recording_download_all(entry_ids, output_folder, referer=None):
+        calls.append((entry_ids, output_folder))
+
+    # Swap the recording fake onto this test's orchestrator instance only
+    # after the initial queue POST above, so its own (unrelated) download_all
+    # call isn't captured too.
+    orchestrator.download_all = recording_download_all
+
+    response = client.post(f"/queue/{entry_id}/resume", json={})
+    assert response.status_code == 202
+    assert calls == [([entry_id], "C:/folder-a")]
+
+
+def test_resume_entry_does_not_reset_progress_fields():
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/558", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.update_progress(entry_id, 42.0, "1MiB/s", 30, "42MB", "100MB")
+    queue_manager.mark_paused(entry_id)
+
+    response = client.post(f"/queue/{entry_id}/resume", json={})
+    assert response.status_code == 202
+    entry = response.json()["entry"]
+    assert entry["percent"] == 42.0
+    assert entry["downloaded_size"] == "42MB"
+    assert entry["total_size"] == "100MB"
 
 
 def test_post_queue_requires_confirmation_when_duplicate_present_and_setting_disabled():

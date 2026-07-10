@@ -1,3 +1,5 @@
+import { showToast } from "./toast.js";
+
 const BACKEND_PORT = window.api?.backendPort ?? 8934;
 const API_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
 
@@ -51,12 +53,13 @@ saveBtn.addEventListener("click", async () => {
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      alert("Failed to save settings" + (body ? ": " + JSON.stringify(body.detail) : "."));
+      showToast("Failed to save settings" + (body ? ": " + JSON.stringify(body.detail) : "."), "error");
       return;
     }
     applySettings(await response.json());
+    showToast("Settings saved", "success");
   } catch (error) {
-    alert("Failed to reach the backend: " + error.message);
+    showToast("Failed to reach the backend: " + error.message, "error");
   }
 });
 

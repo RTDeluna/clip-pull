@@ -67,3 +67,14 @@ class QueueBroadcaster:
             await self.connection_manager.broadcast(
                 {"type": "update_batch", "entries": entries}
             )
+
+    def notify_removed(self, entry_id: str) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no running event loop (e.g. called directly in tests)
+        track_task(
+            asyncio.create_task(
+                self.connection_manager.broadcast({"type": "removed", "entry_id": entry_id})
+            )
+        )

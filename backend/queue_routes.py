@@ -106,14 +106,26 @@ def build_queue_router(
             "duplicate_urls": [],
         }
 
-    @router.delete("/queue/finished")
-    def clear_finished_queue_entries() -> dict:
-        return {"removed": queue_manager.remove_finished()}
-
     @router.post("/queue/{entry_id}/retry", status_code=202)
     async def retry_entry(entry_id: str, request: RetryRequest) -> dict:
         entry = queue_manager.get(entry_id)
         queue_manager.reset_for_retry(entry_id)
+        referer = request.referer or state.referer
+        track_task(
+            asyncio.create_task(
+                orchestrator.download_all([entry_id], entry.output_folder, referer)
+            )
+        )
+        return {"entry": queue_manager.to_dict(entry_id)}
+
+    @router.post("/queue/{entry_id}/pause", status_code=202)
+    def pause_entry(entry_id: str) -> dict:
+        orchestrator.request_pause(entry_id)
+        return {"entry": queue_manager.to_dict(entry_id)}
+
+    @router.post("/queue/{entry_id}/resume", status_code=202)
+    async def resume_entry(entry_id: str, request: RetryRequest) -> dict:
+        entry = queue_manager.get(entry_id)
         referer = request.referer or state.referer
         track_task(
             asyncio.create_task(

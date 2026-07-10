@@ -29,7 +29,7 @@ broadcaster = QueueBroadcaster(connection_manager)
 history_store = HistoryStore(DB_PATH)
 settings_store = SettingsStore(DB_PATH)
 
-queue_manager = QueueManager(on_update=broadcaster.notify)
+queue_manager = QueueManager(on_update=broadcaster.notify, on_remove=broadcaster.notify_removed)
 orchestrator = DownloadOrchestrator(
     queue_manager,
     get_max_concurrent=lambda: settings_store.get()["max_concurrent_downloads"],

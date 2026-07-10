@@ -63,6 +63,26 @@ class HistoryStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete(self, entry_id: int) -> bool:
+        cursor = self._conn.execute("DELETE FROM history WHERE id = ?", (entry_id,))
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def clear(self, query: Optional[str] = None, status: Optional[str] = None) -> int:
+        conditions = []
+        params: list = []
+        if query:
+            conditions.append("(url LIKE ? OR title LIKE ? OR output_path LIKE ?)")
+            like = f"%{query}%"
+            params.extend([like, like, like])
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        cursor = self._conn.execute(f"DELETE FROM history {where}", params)
+        self._conn.commit()
+        return cursor.rowcount
+
     def was_previously_downloaded(self, urls: list[str]) -> set[str]:
         if not urls:
             return set()

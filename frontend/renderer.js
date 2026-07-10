@@ -44,8 +44,50 @@ function formatSizeLine(entry, displayPercent) {
   return `${downloaded} / ${total} · ${Math.round(displayPercent)}%`;
 }
 
+// ── Perceived-speed smoothing ────────────────────────────────────────
+// The backend only pushes an update every ~250ms, and yt-dlp's raw
+// per-chunk numbers arrive in visible jumps. Snapping the bar straight to
+// each new value looks like it's stalling between updates — every major
+// download UI (browsers, Steam, installers) instead eases the displayed
+// value continuously toward the latest real one, so motion never stops.
+// This never shows a percent ahead of the real one, just smooths the
+// path between two real, already-confirmed values.
+let progressAnimationHandle = null;
+
+function applyDisplayedPercent(state) {
+  state.el.querySelector(".progress-fill").style.width = `${state.displayedPercent}%`;
+  if (state.lastEntry) {
+    state.el.querySelector(".queue-row__size").textContent = formatSizeLine(state.lastEntry, state.displayedPercent);
+  }
+}
+
+function stepProgressAnimation() {
+  let anyActive = false;
+  for (const state of rows.values()) {
+    if (state.targetPercent === undefined || state.displayedPercent === state.targetPercent) continue;
+    const diff = state.targetPercent - state.displayedPercent;
+    if (Math.abs(diff) < 0.1) {
+      state.displayedPercent = state.targetPercent;
+    } else {
+      // Eases fastest when furthest away, so it always "catches up" well
+      // before the next real update lands instead of trailing behind it.
+      state.displayedPercent += diff * 0.22;
+      anyActive = true;
+    }
+    applyDisplayedPercent(state);
+  }
+  progressAnimationHandle = anyActive ? requestAnimationFrame(stepProgressAnimation) : null;
+}
+
+function ensureProgressAnimation() {
+  if (progressAnimationHandle === null) {
+    progressAnimationHandle = requestAnimationFrame(stepProgressAnimation);
+  }
+}
+
 function renderRow(entry, { announceCompletion = true } = {}) {
   let state = rows.get(entry.id);
+  const isNewRow = !state;
   if (!state) {
     const el = document.createElement("li");
     el.className = "queue-row queue-row--enter";
@@ -67,7 +109,15 @@ function renderRow(entry, { announceCompletion = true } = {}) {
       <button class="retry-btn" type="button" hidden>Retry</button>
     `;
     queueList.appendChild(el);
-    state = { el, maxPercent: 0, lastStatus: null };
+    state = {
+      el,
+      maxPercent: 0,
+      lastStatus: null,
+      lastTotalSize: null,
+      displayedPercent: 0,
+      targetPercent: undefined,
+      lastEntry: null,
+    };
     rows.set(entry.id, state);
 
     el.querySelector(".retry-btn").addEventListener("click", () => {
@@ -111,6 +161,16 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   if (entry.status === "queued") {
     state.maxPercent = 0;
   }
+  // total_size is the denominator of that pass — it only changes when a new
+  // stream starts (e.g. the small video-only pass finished at 100% and the
+  // much larger audio/merge pass just began). Carrying the old ratcheted
+  // percent across that boundary is what froze the bar at 100% while the
+  // real, much bigger download had barely started — so reset the ratchet
+  // whenever the stream we're tracking changes.
+  if (entry.total_size !== state.lastTotalSize) {
+    state.maxPercent = 0;
+    state.lastTotalSize = entry.total_size;
+  }
   const displayPercent = Math.max(entry.percent, state.maxPercent);
   state.maxPercent = displayPercent;
 
@@ -125,8 +185,17 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   if (entry.status === "error") statusEl.classList.add("queue-row__status--error");
   if (entry.status === "paused") statusEl.classList.add("queue-row__status--paused");
 
-  row.querySelector(".progress-fill").style.width = `${displayPercent}%`;
-  row.querySelector(".queue-row__size").textContent = formatSizeLine(entry, displayPercent);
+  state.lastEntry = entry;
+  state.targetPercent = displayPercent;
+  if (isNewRow || entry.status !== "downloading") {
+    // Snap instead of easing: a freshly-appeared row shouldn't visibly grow
+    // up from 0, and state changes (done/error/paused/reset to queued)
+    // should read as immediate, not smoothed away.
+    state.displayedPercent = displayPercent;
+    applyDisplayedPercent(state);
+  } else {
+    ensureProgressAnimation();
+  }
   row.querySelector(".queue-row__speed").textContent = formatSpeed(entry.speed);
   row.querySelector(".queue-row__eta").textContent = formatEta(entry.eta);
 

@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Skool Video Downloader",
+  "version": "2.0.0",
+  "description": "Detect Skool lesson videos — Skool Native (Mux), YouTube, Vimeo, Loom, Wistia, and Bunny Stream — and send them straight to Clip.Pull's download queue.",
+  "permissions": ["activeTab", "storage", "notifications"],
+  "host_permissions": [
+    "https://www.skool.com/*",
+    "https://skool.com/*",
+    "https://*.loom.com/*",
+    "https://www.loom.com/*",
+    "http://127.0.0.1:8934/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.skool.com/*",
+        "https://skool.com/*",
+        "https://*.loom.com/*",
+        "https://www.loom.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "Icons/icon16.png",
+      "48": "Icons/icon48.png",
+      "128": "Icons/icon128.png"
+    }
+  }
+}

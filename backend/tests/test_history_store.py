@@ -83,6 +83,36 @@ def test_was_previously_downloaded_returns_empty_set_for_empty_input():
     assert store.was_previously_downloaded([]) == set()
 
 
+def test_delete_removes_entry_and_returns_true():
+    store = HistoryStore()
+    result = _record(store)
+    assert store.delete(result["id"]) is True
+    assert store.search() == []
+
+
+def test_delete_returns_false_when_entry_does_not_exist():
+    store = HistoryStore()
+    assert store.delete(999) is False
+
+
+def test_clear_removes_all_entries_when_no_filters():
+    store = HistoryStore()
+    _record(store, url="https://vimeo.com/1")
+    _record(store, url="https://vimeo.com/2")
+    assert store.clear() == 2
+    assert store.search() == []
+
+
+def test_clear_respects_status_filter():
+    store = HistoryStore()
+    _record(store, status="done")
+    _record(store, status="error")
+    assert store.clear(status="error") == 1
+    remaining = store.search()
+    assert len(remaining) == 1
+    assert remaining[0]["status"] == "done"
+
+
 def test_history_persists_across_store_instances_pointing_at_same_file(tmp_path):
     db_path = tmp_path / "history.db"
     store1 = HistoryStore(db_path)

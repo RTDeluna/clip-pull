@@ -72,3 +72,24 @@ def test_queue_broadcaster_does_nothing_with_no_running_loop():
     manager = ConnectionManager()
     broadcaster = QueueBroadcaster(manager)
     broadcaster.notify({"id": "e1", "status": "queued"})  # must not raise
+
+
+def test_notify_removed_broadcasts_removed_message_with_entry_id():
+    manager = ConnectionManager()
+    socket = _FakeSocket()
+    manager.active.append(socket)
+    broadcaster = QueueBroadcaster(manager)
+
+    async def run():
+        broadcaster.notify_removed("e1")
+        await asyncio.sleep(0.01)
+
+    asyncio.run(run())
+
+    assert socket.received == [{"type": "removed", "entry_id": "e1"}]
+
+
+def test_notify_removed_does_nothing_with_no_running_loop():
+    manager = ConnectionManager()
+    broadcaster = QueueBroadcaster(manager)
+    broadcaster.notify_removed("e1")  # must not raise

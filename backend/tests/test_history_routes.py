@@ -56,3 +56,39 @@ def test_get_history_filters_by_status():
     entries = response.json()["entries"]
     assert len(entries) == 1
     assert entries[0]["status"] == "error"
+
+
+def test_delete_history_entry_removes_it():
+    client, store = _make_client()
+    result = store.record(
+        entry_id="e1", batch_id="b1", url="https://vimeo.com/1", title="Video 1",
+        output_path=None, total_size=None, status="done", error_reason=None, retry_count=0,
+    )
+    response = client.delete(f"/history/{result['id']}")
+    assert response.status_code == 200
+    assert response.json()["deleted"] == result["id"]
+    assert client.get("/history").json()["entries"] == []
+
+
+def test_delete_history_entry_404s_when_missing():
+    client, _store = _make_client()
+    response = client.delete("/history/999")
+    assert response.status_code == 404
+
+
+def test_clear_history_removes_matching_entries():
+    client, store = _make_client()
+    store.record(
+        entry_id="e1", batch_id="b1", url="https://vimeo.com/1", title="V1",
+        output_path=None, total_size=None, status="done", error_reason=None, retry_count=0,
+    )
+    store.record(
+        entry_id="e2", batch_id="b1", url="https://vimeo.com/2", title="V2",
+        output_path=None, total_size=None, status="error", error_reason="failed", retry_count=0,
+    )
+    response = client.delete("/history", params={"status": "error"})
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
+    remaining = client.get("/history").json()["entries"]
+    assert len(remaining) == 1
+    assert remaining[0]["status"] == "done"

@@ -68,6 +68,20 @@ def test_set_error_sets_status_and_reason():
     assert updated.error_reason == "Blocked — referer required"
 
 
+def test_mark_paused_sets_status_and_clears_speed_eta_but_keeps_progress():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.0, "1MiB/s", 30, "42MB", "100MB")
+    manager.mark_paused(entry.id)
+    updated = manager.get(entry.id)
+    assert updated.status == "paused"
+    assert updated.speed is None
+    assert updated.eta is None
+    assert updated.percent == 42.0
+    assert updated.downloaded_size == "42MB"
+    assert updated.total_size == "100MB"
+
+
 def test_reset_for_retry_clears_progress_and_increments_retry_count():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -155,6 +169,51 @@ def test_is_batch_complete_false_for_unknown_batch_id():
 def test_is_batch_complete_false_for_none_batch_id():
     manager = QueueManager()
     assert manager.is_batch_complete(None) is False
+
+
+def test_add_entries_skips_urls_already_active_in_queue():
+    manager = QueueManager()
+    [first] = manager.add_entries(["https://vimeo.com/111"])
+    second_batch = manager.add_entries(["https://vimeo.com/111"])
+    assert second_batch == []
+    assert len(manager.get_all()) == 1
+    assert manager.get(first.id).url == "https://vimeo.com/111"
+
+
+def test_add_entries_allows_resubmitting_url_once_it_is_done():
+    manager = QueueManager()
+    [first] = manager.add_entries(["https://vimeo.com/111"])
+    manager.set_status(first.id, "done")
+    second_batch = manager.add_entries(["https://vimeo.com/111"])
+    assert len(second_batch) == 1
+    assert len(manager.get_all()) == 2
+
+
+def test_add_entries_dedupes_within_the_same_batch():
+    manager = QueueManager()
+    entries = manager.add_entries(["https://vimeo.com/111", "https://vimeo.com/111"])
+    assert len(entries) == 1
+
+
+def test_remove_deletes_entry_from_entries_and_order():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.remove(entry.id)
+    assert manager.get_all() == []
+
+
+def test_remove_fires_on_remove_callback_with_entry_id():
+    received = []
+    manager = QueueManager(on_remove=lambda entry_id: received.append(entry_id))
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.remove(entry.id)
+    assert received == [entry.id]
+
+
+def test_remove_is_a_no_op_for_unknown_id():
+    manager = QueueManager()
+    manager.remove("does-not-exist")  # must not raise
+    assert manager.get_all() == []
 
 
 def test_batch_summary_counts_done_and_error():

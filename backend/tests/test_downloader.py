@@ -7,12 +7,14 @@ from unittest.mock import patch
 from queue_manager import QueueManager
 from downloader import (
     CONCURRENT_FRAGMENT_DOWNLOADS,
+    REFERER_BLOCKED_MESSAGE,
     DownloadOrchestrator,
     build_ydl_opts,
     check_aria2c_available,
     check_ffmpeg_available,
     format_bytes,
     format_speed,
+    humanize_error_reason,
     is_referer_blocked_error,
     resolve_output_folder,
     resolve_use_aria2c,
@@ -44,6 +46,51 @@ def test_is_referer_blocked_error_detects_403():
 
 def test_is_referer_blocked_error_ignores_other_errors():
     assert is_referer_blocked_error(Exception("Video unavailable")) is False
+
+
+def test_humanize_error_reason_prioritizes_referer_block_over_other_rules():
+    assert humanize_error_reason(Exception("HTTP Error 403: Forbidden")) == REFERER_BLOCKED_MESSAGE
+
+
+def test_humanize_error_reason_rewrites_file_lock_errors():
+    exc = Exception(
+        "Unable to rename file: [WinError 32] The process cannot access the "
+        "file because it is being used by another process: 'a.part' -> 'a.mp4'"
+    )
+    reason = humanize_error_reason(exc)
+    assert "WinError" not in reason
+    assert "locked by another process" in reason
+
+
+def test_humanize_error_reason_rewrites_missing_fragment_errors():
+    exc = Exception(
+        "Unable to download video: [Errno 2] No such file or directory: "
+        "'a.mp4.part-Frag6'"
+    )
+    reason = humanize_error_reason(exc)
+    assert "Errno" not in reason
+    assert "interrupted before it finished writing" in reason
+
+
+def test_humanize_error_reason_rewrites_404_errors():
+    exc = Exception("ERROR: [vimeo] 000000000: HTTP Error 404: Not Found")
+    reason = humanize_error_reason(exc)
+    assert "404" not in reason
+    assert "couldn't be found" in reason
+
+
+def test_humanize_error_reason_rewrites_network_errors():
+    exc = Exception("<urlopen error [Errno 11001] getaddrinfo failed>")
+    reason = humanize_error_reason(exc)
+    assert "getaddrinfo" not in reason
+    assert "Couldn't reach the video server" in reason
+
+
+def test_humanize_error_reason_strips_ansi_codes_for_unmapped_errors():
+    exc = Exception("\x1b[0;31mERROR:\x1b[0m Something unexpected happened")
+    reason = humanize_error_reason(exc)
+    assert "\x1b" not in reason
+    assert reason == "ERROR: Something unexpected happened"
 
 
 def test_concurrent_fragment_downloads_increased_beyond_original_default():
@@ -472,6 +519,164 @@ def test_entries_without_batch_id_never_trigger_on_batch_complete():
     asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
 
     assert completions == []
+
+
+def test_finished_entry_is_auto_removed_from_queue_once_delay_elapses():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download, auto_remove_delay=0)
+
+    async def run():
+        await orchestrator.download_entry(entry.id, "/tmp/out")
+        # Let the scheduled auto-remove task get its turn on the event loop.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert manager.get_all() == []
+
+
+def test_failed_entry_is_also_auto_removed_from_queue():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        raise Exception("boom")
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=failing_download, auto_remove_delay=0)
+
+    async def run():
+        await orchestrator.download_entry(entry.id, "/tmp/out")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert manager.get_all() == []
+
+
+def test_finished_entry_stays_in_queue_until_delay_elapses():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1"}
+
+    # A long delay that won't elapse during this test's brief run.
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download, auto_remove_delay=10)
+
+    async def run():
+        await orchestrator.download_entry(entry.id, "/tmp/out")
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert manager.get(entry.id).status == "done"
+
+
+def test_auto_removal_does_not_yank_an_entry_retried_during_the_delay_window():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        raise Exception("boom")
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=failing_download, auto_remove_delay=0)
+
+    async def run():
+        await orchestrator.download_entry(entry.id, "/tmp/out")
+        # Simulate the user hitting Retry before the auto-remove task runs.
+        manager.reset_for_retry(entry.id)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    assert manager.get(entry.id).status == "queued"
+
+
+def test_request_pause_returns_false_when_entry_not_currently_downloading():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    orchestrator = DownloadOrchestrator(manager)
+    assert orchestrator.request_pause(entry.id) is False
+    assert orchestrator.request_pause("no-such-entry") is False
+
+
+def test_pause_mid_download_stops_the_download_and_marks_entry_paused():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    hook_called = threading.Event()
+    pause_requested = threading.Event()
+    ran_to_completion = threading.Event()
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes": 100})
+        hook_called.set()
+        # Block until the test has actually called request_pause() — the
+        # next progress_hook call is then guaranteed to observe the pause
+        # flag and raise, unwinding this "blocking" call deterministically
+        # rather than racing a real download's own timing.
+        assert pause_requested.wait(timeout=5)
+        progress_hook({"status": "downloading", "downloaded_bytes": 20, "total_bytes": 100})
+        ran_to_completion.set()
+        return {"title": "should not finish"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+
+    async def run():
+        task = asyncio.create_task(orchestrator.download_entry(entry.id, "/tmp/out"))
+        while not hook_called.is_set():
+            await asyncio.sleep(0.01)
+        assert orchestrator.request_pause(entry.id) is True
+        pause_requested.set()
+        await task
+
+    asyncio.run(run())
+
+    assert manager.get(entry.id).status == "paused"
+    assert not ran_to_completion.is_set()
+
+
+def test_paused_entry_keeps_its_progress_and_is_not_auto_removed():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    hook_called = threading.Event()
+    pause_requested = threading.Event()
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 40, "total_bytes": 100})
+        hook_called.set()
+        assert pause_requested.wait(timeout=5)
+        progress_hook({"status": "downloading", "downloaded_bytes": 50, "total_bytes": 100})
+        return {"title": "should not finish"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download, auto_remove_delay=0)
+
+    async def run():
+        task = asyncio.create_task(orchestrator.download_entry(entry.id, "/tmp/out"))
+        while not hook_called.is_set():
+            await asyncio.sleep(0.01)
+        orchestrator.request_pause(entry.id)
+        pause_requested.set()
+        await task
+        # Let the scheduled auto-remove task get its turn on the event loop.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+    updated = manager.get(entry.id)
+    assert updated.status == "paused"
+    assert updated.percent == 40.0
+    assert manager.get_all() != []
 
 
 def test_resolve_output_folder_appends_sanitized_subfolder_when_given():
