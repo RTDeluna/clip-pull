@@ -6,67 +6,123 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="app__header">
-      <h1 class="app__title">CLIP<span class="app__title-accent">.PULL</span></h1>
-      <p class="app__subtitle">Paste links. Pick a folder. Walk away.</p>
-    </header>
+  <nav class="tabs">
+    <button class="tab-btn active" data-view="view-queue" type="button">Queue</button>
+    <button class="tab-btn" data-view="view-history" type="button">History</button>
+    <button class="tab-btn" data-view="view-settings" type="button">Settings</button>
+  </nav>
 
-    <section class="panel">
-      <label class="field-label" for="urls">Video links (one per line)</label>
-      <div class="urls-editor">
-        <div id="urls-gutter" class="urls-gutter" aria-hidden="true"></div>
-        <textarea
-          id="urls"
-          class="urls-input"
-          spellcheck="false"
-          wrap="off"
-          placeholder="https://vimeo.com/123456789&#10;https://www.loom.com/share/abcd1234ef567890"
-        ></textarea>
-      </div>
-      <div id="invalid-lines" class="invalid-lines" hidden></div>
+  <div id="view-queue" class="view">
+    <div class="app">
+      <header class="app__header">
+        <h1 class="app__title">CLIP<span class="app__title-accent">.PULL</span></h1>
+        <p class="app__subtitle">Paste links. Pick a folder. Walk away.</p>
+      </header>
 
-      <div class="field-row">
-        <div class="field-group field-group--grow">
-          <label class="field-label" for="output-folder">Save to</label>
-          <div class="folder-picker">
-            <input
-              id="output-folder"
-              class="folder-input"
-              type="text"
-              placeholder="Choose a folder…"
-              readonly
-            />
-            <button id="browse-btn" class="btn btn--ghost" type="button">Browse…</button>
+      <section class="panel">
+        <label class="field-label" for="urls">Video links (one per line)</label>
+        <div class="urls-editor">
+          <div id="urls-gutter" class="urls-gutter" aria-hidden="true"></div>
+          <textarea
+            id="urls"
+            class="urls-input"
+            spellcheck="false"
+            wrap="off"
+            placeholder="https://vimeo.com/123456789&#10;https://www.loom.com/share/abcd1234ef567890"
+          ></textarea>
+        </div>
+        <div id="invalid-lines" class="invalid-lines" hidden></div>
+
+        <div class="field-row">
+          <div class="field-group field-group--grow">
+            <label class="field-label" for="output-folder">Save to</label>
+            <div class="folder-picker">
+              <input
+                id="output-folder"
+                class="folder-input"
+                type="text"
+                placeholder="Choose a folder…"
+                readonly
+              />
+              <button id="browse-btn" class="btn btn--ghost" type="button">Browse…</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="field-row">
-        <div class="field-group field-group--grow">
-          <label class="field-label" for="referer">Referer domain (optional)</label>
-          <input
-            id="referer"
-            class="text-input"
-            type="text"
-            placeholder="e.g. https://your-course-site.com"
-          />
+        <div class="field-row">
+          <div class="field-group field-group--grow">
+            <label class="field-label" for="referer">Referer domain (optional)</label>
+            <input
+              id="referer"
+              class="text-input"
+              type="text"
+              placeholder="e.g. https://your-course-site.com"
+            />
+          </div>
         </div>
-      </div>
 
-      <button id="start-btn" class="btn btn--primary" type="button">Start Download</button>
-    </section>
+        <button id="start-btn" class="btn btn--primary" type="button">Start Download</button>
+      </section>
 
-    <section class="panel">
-      <div class="queue-header">
-        <h2 class="queue-title">Queue</h2>
-        <span id="queue-summary" class="queue-summary"></span>
+      <section class="panel">
+        <div class="queue-header">
+          <h2 class="queue-title">Queue</h2>
+          <span id="queue-summary" class="queue-summary"></span>
+        </div>
+        <ul id="queue-list" class="queue-list"></ul>
+      </section>
+    </div>
+  </div>
+
+  <div id="view-history" class="view" hidden>
+    <div class="app">
+      <h2 class="queue-title">History</h2>
+      <div class="history-controls">
+        <input id="history-search" class="text-input" type="text" placeholder="Search title, URL, or file path…" />
+        <select id="history-status-filter" class="text-input">
+          <option value="">All</option>
+          <option value="done">Done</option>
+          <option value="error">Failed</option>
+        </select>
       </div>
-      <ul id="queue-list" class="queue-list"></ul>
-    </section>
+      <ul id="history-list" class="queue-list"></ul>
+    </div>
+  </div>
+
+  <div id="view-settings" class="view" hidden>
+    <div class="app">
+      <h2 class="queue-title">Settings</h2>
+      <div class="panel">
+        <label class="field-label" for="setting-max-concurrent">Max concurrent downloads</label>
+        <input id="setting-max-concurrent" class="text-input" type="number" min="1" max="10" />
+
+        <label class="field-label" for="setting-fragment-concurrency">Fragment concurrency</label>
+        <input id="setting-fragment-concurrency" class="text-input" type="number" min="1" max="32" />
+
+        <label class="field-label">
+          <input id="setting-aria2c-enabled" type="checkbox" /> Use aria2c when available
+          <span id="aria2c-detected-note" class="queue-summary"></span>
+        </label>
+
+        <label class="field-label">
+          <input id="setting-skip-duplicates" type="checkbox" /> Skip already-downloaded links automatically
+        </label>
+
+        <label class="field-label" for="setting-default-folder">Default output folder</label>
+        <div class="folder-picker">
+          <input id="setting-default-folder" class="folder-input" type="text" readonly />
+          <button id="setting-browse-btn" class="btn btn--ghost" type="button">Browse…</button>
+        </div>
+
+        <button id="settings-save-btn" class="btn btn--primary" type="button">Save Settings</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="ws-client.js"></script>
+  <script type="module" src="tabs.js"></script>
+  <script type="module" src="settings-view.js"></script>
+  <script type="module" src="history-view.js"></script>
   <script type="module" src="renderer.js"></script>
 </body>
 </html>
