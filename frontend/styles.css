@@ -602,6 +602,13 @@ input[type="checkbox"] {
   overflow-wrap: break-word;
 }
 
+.queue-row__stage {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .queue-row__status {
   font-family: var(--font-mono);
   font-size: 10px;

@@ -26,6 +26,17 @@ function statusLabel(entry) {
   return "Queued";
 }
 
+const STAGE_LABELS = {
+  video: "Downloading video…",
+  audio: "Downloading audio…",
+  merging: "Merging video + audio…",
+};
+
+function stageLabel(entry) {
+  if (entry.status !== "downloading") return null;
+  return STAGE_LABELS[entry.stage] || null;
+}
+
 function formatSpeed(speed) {
   return speed ? speed : "--";
 }
@@ -116,6 +127,7 @@ function renderRow(entry, { announceCompletion = true } = {}) {
         <span class="queue-row__duplicate-badge" hidden>Already downloaded</span>
         <span class="queue-row__status"></span>
       </div>
+      <div class="queue-row__stage" hidden></div>
       <div class="progress-track"><div class="progress-fill"></div></div>
       <div class="queue-row__size"></div>
       <div class="queue-row__meta">
@@ -204,6 +216,11 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   if (entry.status === "done") statusEl.classList.add("queue-row__status--done");
   if (entry.status === "error") statusEl.classList.add("queue-row__status--error");
   if (entry.status === "paused") statusEl.classList.add("queue-row__status--paused");
+
+  const stageEl = row.querySelector(".queue-row__stage");
+  const stage = stageLabel(entry);
+  stageEl.textContent = stage || "";
+  stageEl.hidden = !stage;
 
   state.lastEntry = entry;
   state.targetPercent = displayPercent;
