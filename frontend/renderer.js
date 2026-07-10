@@ -1,4 +1,5 @@
 import { connectQueueSocket } from "./ws-client.js";
+import { showToast } from "./toast.js";
 
 const BACKEND_PORT = window.api?.backendPort ?? 8934;
 const API_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
@@ -21,6 +22,7 @@ function statusLabel(entry) {
   if (entry.status === "error") return "Failed";
   if (entry.status === "done") return "Done";
   if (entry.status === "downloading") return "Downloading";
+  if (entry.status === "paused") return "Paused";
   return "Queued";
 }
 
@@ -46,7 +48,7 @@ function renderRow(entry) {
   let state = rows.get(entry.id);
   if (!state) {
     const el = document.createElement("li");
-    el.className = "queue-row";
+    el.className = "queue-row queue-row--enter";
     el.innerHTML = `
       <div class="queue-row__top">
         <span class="queue-row__title"></span>
@@ -60,7 +62,9 @@ function renderRow(entry) {
         <span class="queue-row__eta" title="Estimated time remaining"></span>
       </div>
       <div class="queue-row__error"></div>
-      <button class="retry-btn" hidden>Retry</button>
+      <button class="pause-btn" type="button" hidden>Pause</button>
+      <button class="resume-btn" type="button" hidden>Resume</button>
+      <button class="retry-btn" type="button" hidden>Retry</button>
     `;
     queueList.appendChild(el);
     state = { el, maxPercent: 0, lastStatus: null };
@@ -68,6 +72,12 @@ function renderRow(entry) {
 
     el.querySelector(".retry-btn").addEventListener("click", () => {
       retryEntry(entry.id);
+    });
+    el.querySelector(".pause-btn").addEventListener("click", () => {
+      pauseEntry(entry.id);
+    });
+    el.querySelector(".resume-btn").addEventListener("click", () => {
+      resumeEntry(entry.id);
     });
   }
   const row = state.el;
@@ -88,6 +98,8 @@ function renderRow(entry) {
   const displayPercent = Math.max(entry.percent, state.maxPercent);
   state.maxPercent = displayPercent;
 
+  row.classList.toggle("queue-row--downloading", entry.status === "downloading");
+
   row.querySelector(".queue-row__title").textContent = entry.title || entry.url;
   row.querySelector(".queue-row__duplicate-badge").hidden = !entry.previously_downloaded;
   const statusEl = row.querySelector(".queue-row__status");
@@ -95,6 +107,7 @@ function renderRow(entry) {
   statusEl.className = "queue-row__status";
   if (entry.status === "done") statusEl.classList.add("queue-row__status--done");
   if (entry.status === "error") statusEl.classList.add("queue-row__status--error");
+  if (entry.status === "paused") statusEl.classList.add("queue-row__status--paused");
 
   row.querySelector(".progress-fill").style.width = `${displayPercent}%`;
   row.querySelector(".queue-row__size").textContent = formatSizeLine(entry, displayPercent);
@@ -111,6 +124,9 @@ function renderRow(entry) {
     retryBtn.hidden = true;
   }
 
+  row.querySelector(".pause-btn").hidden = entry.status !== "downloading";
+  row.querySelector(".resume-btn").hidden = entry.status !== "paused";
+
   updateSummary();
 }
 
@@ -119,6 +135,22 @@ function updateSummary() {
   queueSummary.textContent = total
     ? `${summaryCounts.done}/${total} downloaded${summaryCounts.error ? `, ${summaryCounts.error} failed` : ""}`
     : "";
+}
+
+// Finished entries (done/error) are already recorded in History — the
+// backend clears them out of the live queue a few seconds after they
+// complete, and notifies us here so we can fade the row out instead of
+// it just vanishing.
+function removeRow(entryId) {
+  const state = rows.get(entryId);
+  if (!state) return;
+  if (state.lastStatus === "done") summaryCounts.done -= 1;
+  if (state.lastStatus === "error") summaryCounts.error -= 1;
+  rows.delete(entryId);
+  updateSummary();
+
+  state.el.classList.add("queue-row--leaving");
+  state.el.addEventListener("animationend", () => state.el.remove(), { once: true });
 }
 
 function isSupportedUrl(str) {
@@ -158,13 +190,48 @@ renderGutter();
 
 async function retryEntry(entryId) {
   try {
-    await fetch(`${API_BASE}/queue/${entryId}/retry`, {
+    const response = await fetch(`${API_BASE}/queue/${entryId}/retry`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ referer: refererInput.value || null }),
     });
+    if (!response.ok) {
+      showToast("Failed to queue this retry.", "error");
+      return;
+    }
+    showToast("Queued for retry", "success");
   } catch (error) {
-    alert("Retry failed: " + error.message);
+    showToast("Retry failed: " + error.message, "error");
+  }
+}
+
+async function pauseEntry(entryId) {
+  try {
+    const response = await fetch(`${API_BASE}/queue/${entryId}/pause`, { method: "POST" });
+    if (!response.ok) {
+      showToast("Failed to pause this download.", "error");
+      return;
+    }
+    showToast("Paused", "success");
+  } catch (error) {
+    showToast("Failed to reach the backend: " + error.message, "error");
+  }
+}
+
+async function resumeEntry(entryId) {
+  try {
+    const response = await fetch(`${API_BASE}/queue/${entryId}/resume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ referer: refererInput.value || null }),
+    });
+    if (!response.ok) {
+      showToast("Failed to resume this download.", "error");
+      return;
+    }
+    showToast("Resumed", "success");
+  } catch (error) {
+    showToast("Resume failed: " + error.message, "error");
   }
 }
 
@@ -175,30 +242,93 @@ browseBtn.addEventListener("click", async () => {
   }
 });
 
+const duplicateOverlay = document.getElementById("duplicate-confirm-overlay");
+const duplicateList = document.getElementById("duplicate-confirm-list");
+const duplicateSkipBtn = document.getElementById("duplicate-confirm-skip");
+const duplicateContinueBtn = document.getElementById("duplicate-confirm-continue");
+
+function confirmDuplicates(duplicateUrls) {
+  return new Promise((resolve) => {
+    duplicateList.innerHTML = "";
+    duplicateUrls.forEach((url) => {
+      const li = document.createElement("li");
+      li.textContent = url;
+      duplicateList.appendChild(li);
+    });
+    duplicateOverlay.hidden = false;
+    duplicateContinueBtn.focus();
+
+    function cleanup(decision) {
+      duplicateOverlay.hidden = true;
+      duplicateSkipBtn.removeEventListener("click", onSkip);
+      duplicateContinueBtn.removeEventListener("click", onContinue);
+      duplicateOverlay.removeEventListener("click", onBackdropClick);
+      document.removeEventListener("keydown", onKeydown);
+      resolve(decision);
+    }
+    function onSkip() {
+      cleanup("skip_duplicates");
+    }
+    function onContinue() {
+      cleanup("queue_all");
+    }
+    function onBackdropClick(event) {
+      if (event.target === duplicateOverlay) cleanup(null);
+    }
+    function onKeydown(event) {
+      if (event.key === "Escape") cleanup(null);
+    }
+
+    duplicateSkipBtn.addEventListener("click", onSkip);
+    duplicateContinueBtn.addEventListener("click", onContinue);
+    duplicateOverlay.addEventListener("click", onBackdropClick);
+    document.addEventListener("keydown", onKeydown);
+  });
+}
+
+async function postQueue(payload) {
+  const response = await fetch(`${API_BASE}/queue`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return response.json();
+}
+
 startBtn.addEventListener("click", async () => {
   if (!outputFolderInput.value) {
-    alert("Choose an output folder first.");
+    showToast("Choose an output folder first.", "error");
     return;
   }
   startBtn.disabled = true;
   invalidLinesEl.hidden = true;
 
+  const payload = {
+    urls_text: urlsInput.value,
+    output_folder: outputFolderInput.value,
+    referer: refererInput.value || null,
+    subfolder: courseFolderInput.value || null,
+  };
+
   try {
-    const response = await fetch(`${API_BASE}/queue`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        urls_text: urlsInput.value,
-        output_folder: outputFolderInput.value,
-        referer: refererInput.value || null,
-        subfolder: courseFolderInput.value || null,
-      }),
-    });
-    const body = await response.json();
+    let body = await postQueue(payload);
 
     if (body.invalid_lines && body.invalid_lines.length > 0) {
       invalidLinesEl.hidden = false;
       invalidLinesEl.textContent = `Skipped invalid lines:\n${body.invalid_lines.join("\n")}`;
+      showToast(`Skipped ${body.invalid_lines.length} invalid line${body.invalid_lines.length === 1 ? "" : "s"}`, "warning");
+    }
+
+    if (body.needs_confirmation) {
+      const decision = await confirmDuplicates(body.duplicate_urls || []);
+      if (!decision) {
+        return;
+      }
+      body = await postQueue({ ...payload, duplicate_action: decision });
+    }
+
+    if (body.entries.length) {
+      showToast(`Added ${body.entries.length} link${body.entries.length === 1 ? "" : "s"} to the queue`, "success");
     }
 
     body.entries.forEach(renderRow);
@@ -207,6 +337,7 @@ startBtn.addEventListener("click", async () => {
   } catch (error) {
     invalidLinesEl.hidden = false;
     invalidLinesEl.textContent = "Failed to reach the backend: " + error.message;
+    showToast("Failed to reach the backend: " + error.message, "error");
   } finally {
     startBtn.disabled = false;
   }
@@ -217,10 +348,17 @@ connectQueueSocket((event) => {
     event.entries.forEach(renderRow);
   } else if (event.type === "update_batch") {
     event.entries.forEach(renderRow);
+  } else if (event.type === "removed") {
+    removeRow(event.entry_id);
   } else if (event.type === "batch_complete") {
+    const { done, error } = event.summary;
+    showToast(
+      `Batch complete — ${done} done${error ? `, ${error} failed` : ""}`,
+      error ? "warning" : "success"
+    );
     if (window.Notification && Notification.permission === "granted") {
       new Notification("Batch complete", {
-        body: `${event.summary.done} done, ${event.summary.error} failed`,
+        body: `${done} done, ${error} failed`,
       });
     } else if (window.Notification && Notification.permission !== "denied") {
       Notification.requestPermission();
