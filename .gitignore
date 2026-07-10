@@ -13,3 +13,5 @@ assets/extension/*.zip
 .superpowers/
 .claude/
 .pytest_cache/
+docs/
+pytest.ini

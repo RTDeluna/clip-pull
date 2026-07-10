@@ -29,6 +29,19 @@ broadcaster = QueueBroadcaster(connection_manager)
 history_store = HistoryStore(DB_PATH)
 settings_store = SettingsStore(DB_PATH)
 
+
+def record_history_and_broadcast(**kwargs) -> dict:
+    # Finished downloads only land in the History tab via this WS push —
+    # without it, History only ever updates on the next manual refresh/search.
+    row = history_store.record(**kwargs)
+    track_task(
+        asyncio.create_task(
+            connection_manager.broadcast({"type": "history_added", "entry": row})
+        )
+    )
+    return row
+
+
 queue_manager = QueueManager(on_update=broadcaster.notify, on_remove=broadcaster.notify_removed)
 orchestrator = DownloadOrchestrator(
     queue_manager,
@@ -36,7 +49,7 @@ orchestrator = DownloadOrchestrator(
     get_max_concurrent=lambda: settings_store.get()["max_concurrent_downloads"],
     get_fragment_concurrency=lambda: settings_store.get()["concurrent_fragment_downloads"],
     get_aria2c_enabled=lambda: settings_store.get()["aria2c_enabled"],
-    record_history=lambda **kwargs: history_store.record(**kwargs),
+    record_history=record_history_and_broadcast,
     on_batch_complete=lambda batch_id, summary: track_task(
         asyncio.create_task(
             connection_manager.broadcast(
