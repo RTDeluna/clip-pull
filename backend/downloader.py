@@ -19,6 +19,12 @@ def sanitize_filename(name: str) -> str:
     return cleaned or "untitled"
 
 
+def resolve_output_folder(base_folder: str, subfolder: Optional[str]) -> str:
+    if not subfolder or not subfolder.strip():
+        return base_folder
+    return str(Path(base_folder) / sanitize_filename(subfolder))
+
+
 def check_ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 

@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 from queue_manager import QueueManager
@@ -13,6 +14,7 @@ from downloader import (
     format_bytes,
     format_speed,
     is_referer_blocked_error,
+    resolve_output_folder,
     resolve_use_aria2c,
     sanitize_filename,
 )
@@ -470,3 +472,16 @@ def test_entries_without_batch_id_never_trigger_on_batch_complete():
     asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
 
     assert completions == []
+
+
+def test_resolve_output_folder_appends_sanitized_subfolder_when_given():
+    result = resolve_output_folder("C:/downloads", "My Course: Part 1")
+    assert result == str(Path("C:/downloads") / "My Course_ Part 1")
+
+
+def test_resolve_output_folder_returns_base_unchanged_when_subfolder_none():
+    assert resolve_output_folder("C:/downloads", None) == "C:/downloads"
+
+
+def test_resolve_output_folder_returns_base_unchanged_when_subfolder_blank():
+    assert resolve_output_folder("C:/downloads", "   ") == "C:/downloads"
