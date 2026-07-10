@@ -1,42 +1,50 @@
-from url_validation import is_vimeo_url, parse_url_list
+from url_validation import is_supported_url, parse_url_list
 
 
-def test_is_vimeo_url_accepts_standard_link():
-    assert is_vimeo_url("https://vimeo.com/123456789") is True
+def test_accepts_standard_vimeo_link():
+    assert is_supported_url("https://vimeo.com/123456789") is True
 
 
-def test_is_vimeo_url_accepts_link_with_hash_param():
-    assert is_vimeo_url("https://vimeo.com/123456789?h=abcdef1234") is True
+def test_accepts_vimeo_link_with_hash_param():
+    assert is_supported_url("https://vimeo.com/123456789?h=abcdef1234") is True
 
 
-def test_is_vimeo_url_accepts_player_embed_link():
-    assert is_vimeo_url("https://player.vimeo.com/video/123456789") is True
+def test_accepts_vimeo_path_based_private_link():
+    assert is_supported_url("https://vimeo.com/123456789/abc123def") is True
 
 
-def test_is_vimeo_url_accepts_path_based_private_link():
-    assert is_vimeo_url("https://vimeo.com/123456789/abc123def") is True
+def test_accepts_loom_share_link():
+    assert is_supported_url("https://www.loom.com/share/abcdef1234567890") is True
 
 
-def test_is_vimeo_url_accepts_path_based_private_link_with_www():
-    assert is_vimeo_url("https://www.vimeo.com/123456789/abc123def") is True
+def test_accepts_youtube_link():
+    assert is_supported_url("https://www.youtube.com/watch?v=abc123") is True
 
 
-def test_is_vimeo_url_rejects_non_vimeo_link():
-    assert is_vimeo_url("https://youtube.com/watch?v=abc123") is False
+def test_accepts_arbitrary_https_url():
+    assert is_supported_url("https://example.com/some/video/path") is True
 
 
-def test_is_vimeo_url_rejects_empty_string():
-    assert is_vimeo_url("") is False
+def test_rejects_url_without_scheme():
+    assert is_supported_url("vimeo.com/123456789") is False
 
 
-def test_is_vimeo_url_rejects_garbage_text():
-    assert is_vimeo_url("not a url at all") is False
+def test_rejects_non_http_scheme():
+    assert is_supported_url("ftp://example.com/video") is False
+
+
+def test_rejects_empty_string():
+    assert is_supported_url("") is False
+
+
+def test_rejects_garbage_text():
+    assert is_supported_url("not a url at all") is False
 
 
 def test_parse_url_list_splits_valid_and_invalid_lines():
-    text = "https://vimeo.com/111\nnot a url\nhttps://vimeo.com/222?h=abc\n\n"
+    text = "https://vimeo.com/111\nnot a url\nhttps://www.loom.com/share/abc\n\n"
     valid, invalid = parse_url_list(text)
-    assert valid == ["https://vimeo.com/111", "https://vimeo.com/222?h=abc"]
+    assert valid == ["https://vimeo.com/111", "https://www.loom.com/share/abc"]
     assert invalid == ["not a url"]
 
 

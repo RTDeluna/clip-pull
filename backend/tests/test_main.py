@@ -56,6 +56,19 @@ def test_post_queue_reports_invalid_lines_without_blocking_valid_ones():
     assert body["invalid_lines"] == ["not a url"]
 
 
+def test_post_queue_accepts_non_vimeo_urls_like_loom():
+    response = client.post(
+        "/queue",
+        json={
+            "urls_text": "https://www.loom.com/share/abc123",
+            "output_folder": "C:/downloads",
+        },
+    )
+    body = response.json()
+    assert len(body["entries"]) == 1
+    assert body["invalid_lines"] == []
+
+
 def test_get_queue_returns_current_entries():
     client.post(
         "/queue",

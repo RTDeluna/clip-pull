@@ -154,6 +154,14 @@ class DownloadOrchestrator:
                 info = await loop.run_in_executor(
                     None, self.download_fn, url, output_folder, referer, progress_hook
                 )
+                # progress_hook's last update is scheduled via
+                # call_soon_threadsafe from the worker thread and isn't
+                # guaranteed to be processed before this coroutine resumes.
+                # Yielding once lets any already-scheduled callback run first,
+                # so the completion state below is always the authoritative,
+                # final word rather than possibly being overwritten by a
+                # late-arriving progress tick.
+                await asyncio.sleep(0)
                 title = info.get("title") if isinstance(info, dict) else None
                 if title:
                     self.queue_manager.set_title(entry_id, title)

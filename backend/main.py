@@ -141,7 +141,7 @@ if __name__ == "__main__":
 
     if not check_ffmpeg_available():
         print(
-            "WARNING: ffmpeg not found on PATH. High-quality Vimeo downloads "
+            "WARNING: ffmpeg not found on PATH. High-quality downloads "
             "require ffmpeg to merge video+audio streams; downloads may fail "
             "or fall back to lower quality without it.",
             file=sys.stderr,

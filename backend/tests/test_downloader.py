@@ -174,6 +174,26 @@ def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
 
+    # The hook's update is scheduled via call_soon_threadsafe, so its exact
+    # ordering relative to the orchestrator's own post-success call isn't
+    # guaranteed when download_fn returns instantly (a real yt-dlp download
+    # always has real elapsed time between hook ticks and completion, so
+    # this ordering is never actually racy in production). Capture every
+    # call and check the post-success call's own arguments directly, rather
+    # than the entry's final field values, which depend on that ordering.
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None
+    ):
+        calls.append((percent, speed, eta, downloaded_size, total_size))
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size
+        )
+
+    manager.update_progress = capturing_update_progress
+
     def fake_download(url, output_folder, referer, progress_hook):
         progress_hook(
             {"status": "downloading", "downloaded_bytes": 50, "total_bytes": 100}
@@ -183,10 +203,12 @@ def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
     orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
     asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
 
-    updated = manager.get(entry.id)
-    assert updated.status == "done"
-    assert updated.downloaded_size is None
-    assert updated.total_size is None
+    final_calls = [c for c in calls if c[0] == 100.0]
+    assert len(final_calls) == 1
+    _, _, _, downloaded_size, total_size = final_calls[0]
+    assert downloaded_size is None
+    assert total_size is None
+    assert manager.get(entry.id).status == "done"
 
 
 def test_download_entry_marks_done_and_sets_title_on_success():
