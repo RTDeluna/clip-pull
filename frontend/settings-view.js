@@ -63,7 +63,13 @@ saveBtn.addEventListener("click", async () => {
       showToast("Failed to save settings" + (body ? ": " + JSON.stringify(body.detail) : "."), "error");
       return;
     }
-    applySettings(await response.json());
+    const savedSettings = await response.json();
+    applySettings(savedSettings);
+    // The Queue tab's "Save to" field only prefills from /settings once, at
+    // page load — if the default output folder is set or changed after
+    // that (the common case, since Settings is visited after launch), it
+    // would otherwise never reach Queue until the app restarts.
+    document.dispatchEvent(new CustomEvent("clippull:settings-saved", { detail: savedSettings }));
     showToast("Settings saved", "success");
   } catch (error) {
     showToast("Failed to reach the backend: " + error.message, "error");

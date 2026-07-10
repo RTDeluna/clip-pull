@@ -562,3 +562,14 @@ async function prefillDefaultOutputFolder(retriesLeft = 10) {
 }
 
 prefillDefaultOutputFolder();
+
+// Picks up a default output folder set (or changed) in Settings after this
+// page's own one-shot prefill above already ran — without this, saving a
+// new default while the Queue tab's "Save to" field is empty would never
+// show up here until the app was restarted. Never overwrites a folder the
+// user already chose (typed or via Browse…).
+document.addEventListener("clippull:settings-saved", (event) => {
+  if (!outputFolderInput.value && event.detail.default_output_folder) {
+    outputFolderInput.value = event.detail.default_output_folder;
+  }
+});
