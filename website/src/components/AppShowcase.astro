@@ -11,6 +11,8 @@ import IconSliders from "../icons/IconSliders.astro";
 import IconPuzzle from "../icons/IconPuzzle.astro";
 import IconChevronLeft from "../icons/IconChevronLeft.astro";
 import IconChevronRight from "../icons/IconChevronRight.astro";
+import IconExpand from "../icons/IconExpand.astro";
+import IconClose from "../icons/IconClose.astro";
 
 const tabs = [
   {
@@ -90,6 +92,10 @@ const tabs = [
                 class="w-full h-full object-cover object-top pointer-events-none"
                 loading={index === 0 ? "eager" : "lazy"}
               />
+              <span class="showcase-card__zoom-hint" aria-hidden="true">
+                <IconExpand class="w-5 h-5" />
+                <span class="text-xs font-semibold">View full size</span>
+              </span>
               <span class="showcase-card__badge glass-strong">
                 <tab.icon class="w-4 h-4 text-accent" />
                 {tab.label}
@@ -126,6 +132,26 @@ const tabs = [
           ></button>
         ))}
       </div>
+    </div>
+
+    <div
+      id="showcase-lightbox"
+      class="showcase-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Screenshot preview"
+      hidden
+    >
+      <button
+        type="button"
+        data-ripple
+        data-showcase-lightbox-close
+        aria-label="Close preview"
+        class="showcase-lightbox__close glass-strong border border-glass-border"
+      >
+        <IconClose class="w-5 h-5" />
+      </button>
+      <img id="showcase-lightbox-img" class="showcase-lightbox__image" alt="" />
     </div>
   </div>
 </section>
