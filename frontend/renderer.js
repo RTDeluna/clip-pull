@@ -193,16 +193,6 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   if (entry.status === "queued") {
     state.maxPercent = 0;
   }
-  // total_size is the denominator of that pass — it only changes when a new
-  // stream starts (e.g. the small video-only pass finished at 100% and the
-  // much larger audio/merge pass just began). Carrying the old ratcheted
-  // percent across that boundary is what froze the bar at 100% while the
-  // real, much bigger download had barely started — so reset the ratchet
-  // whenever the stream we're tracking changes.
-  if (entry.total_size !== state.lastTotalSize) {
-    state.maxPercent = 0;
-    state.lastTotalSize = entry.total_size;
-  }
   const displayPercent = Math.max(entry.percent, state.maxPercent);
   state.maxPercent = displayPercent;
 
