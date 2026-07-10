@@ -10,6 +10,7 @@ from queue_manager import QueueManager
 MAX_CONCURRENT_DOWNLOADS = 3
 REFERER_BLOCKED_MESSAGE = "Blocked — this video may require the course site as referer"
 PROGRESS_THROTTLE_SECONDS = 0.25
+CONCURRENT_FRAGMENT_DOWNLOADS = 8
 
 
 def sanitize_filename(name: str) -> str:
@@ -20,6 +21,10 @@ def sanitize_filename(name: str) -> str:
 
 def check_ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
+
+
+def check_aria2c_available() -> bool:
+    return shutil.which("aria2c") is not None
 
 
 def format_speed(speed_bytes_per_sec: Optional[float]) -> Optional[str]:
@@ -45,17 +50,22 @@ def build_ydl_opts(
     output_template: str,
     referer: Optional[str],
     progress_hook: Callable[[dict], None],
+    use_aria2c: bool = False,
 ) -> dict:
     opts = {
         "format": "bestvideo+bestaudio/best",
         "outtmpl": output_template,
-        "concurrent_fragment_downloads": 5,
+        "concurrent_fragment_downloads": CONCURRENT_FRAGMENT_DOWNLOADS,
         "progress_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
     }
     if referer:
         opts["http_headers"] = {"Referer": referer}
+    if use_aria2c:
+        # yt-dlp's own Aria2cFD already applies well-tuned parallelism
+        # defaults (-x16 -j16 -s16); no need to override external_downloader_args.
+        opts["external_downloader"] = "aria2c"
     return opts
 
 
@@ -70,7 +80,8 @@ def run_download(
     import yt_dlp
 
     output_template = str(Path(output_folder) / "%(title)s [%(id)s].%(ext)s")
-    opts = build_ydl_opts(output_template, referer, progress_hook)
+    use_aria2c = check_aria2c_available()
+    opts = build_ydl_opts(output_template, referer, progress_hook, use_aria2c=use_aria2c)
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=True)
 

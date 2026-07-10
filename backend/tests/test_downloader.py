@@ -5,8 +5,10 @@ from unittest.mock import patch
 
 from queue_manager import QueueManager
 from downloader import (
+    CONCURRENT_FRAGMENT_DOWNLOADS,
     DownloadOrchestrator,
     build_ydl_opts,
+    check_aria2c_available,
     check_ffmpeg_available,
     format_speed,
     is_referer_blocked_error,
@@ -38,6 +40,46 @@ def test_is_referer_blocked_error_detects_403():
 
 def test_is_referer_blocked_error_ignores_other_errors():
     assert is_referer_blocked_error(Exception("Video unavailable")) is False
+
+
+def test_concurrent_fragment_downloads_increased_beyond_original_default():
+    assert CONCURRENT_FRAGMENT_DOWNLOADS > 5
+
+
+def test_build_ydl_opts_uses_named_fragment_concurrency_constant():
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["concurrent_fragment_downloads"] == CONCURRENT_FRAGMENT_DOWNLOADS
+
+
+def test_check_aria2c_available_returns_true_when_on_path():
+    with patch("shutil.which", return_value="C:/aria2/aria2c.exe"):
+        assert check_aria2c_available() is True
+
+
+def test_check_aria2c_available_returns_false_when_missing():
+    with patch("shutil.which", return_value=None):
+        assert check_aria2c_available() is False
+
+
+def test_build_ydl_opts_configures_aria2c_when_enabled():
+    opts = build_ydl_opts(
+        "out/%(title)s.%(ext)s", None, lambda d: None, use_aria2c=True
+    )
+    assert opts["external_downloader"] == "aria2c"
+
+
+def test_build_ydl_opts_omits_aria2c_when_disabled():
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert "external_downloader" not in opts
+
+
+def test_build_ydl_opts_format_unchanged_regardless_of_aria2c():
+    without_aria2c = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    with_aria2c = build_ydl_opts(
+        "out/%(title)s.%(ext)s", None, lambda d: None, use_aria2c=True
+    )
+    assert without_aria2c["format"] == "bestvideo+bestaudio/best"
+    assert with_aria2c["format"] == "bestvideo+bestaudio/best"
 
 
 def test_check_ffmpeg_available_returns_true_when_on_path():
