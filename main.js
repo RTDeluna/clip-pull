@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const http = require("http");
@@ -59,6 +59,10 @@ ipcMain.handle("choose-folder", async () => {
     return null;
   }
   return result.filePaths[0];
+});
+
+ipcMain.handle("reveal-file", (_, filePath) => {
+  shell.showItemInFolder(filePath);
 });
 
 app.whenReady().then(() => {
