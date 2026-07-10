@@ -1,0 +1,32 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#12121c" />
+      <stop offset="100%" stop-color="#0a0a10" />
+    </linearGradient>
+    <radialGradient id="blob1" cx="15%" cy="15%" r="45%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="blob2" cx="90%" cy="20%" r="45%">
+      <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#8b5cf6" />
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)" />
+  <rect width="1920" height="1080" fill="url(#blob1)" />
+  <rect width="1920" height="1080" fill="url(#blob2)" />
+  <rect x="48" y="48" width="1824" height="984" rx="24" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="3" stroke-dasharray="16 12" />
+  <rect x="925" y="440" width="70" height="60" rx="10" fill="none" stroke="url(#accent)" stroke-width="8" />
+  <path d="M955 440v-10a10 10 0 0 1 20 0v10" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linecap="round" />
+  <text x="960" y="600" font-family="sans-serif" font-size="36" font-weight="700" fill="#f2f2f7" text-anchor="middle">
+    Extension screenshot goes here
+  </text>
+  <text x="960" y="644" font-family="sans-serif" font-size="21" fill="#9b9bb3" text-anchor="middle">
+    Replace src/assets/dashboard-extension.png with the real app screenshot
+  </text>
+</svg>

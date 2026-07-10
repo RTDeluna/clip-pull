@@ -2,11 +2,13 @@ import { initRipple } from "./ripple";
 import { initReveal } from "./reveal";
 import { initThemeToggle } from "./theme-toggle";
 import { initOsDetect } from "./os-detect";
+import { initShowcase } from "./showcase";
 
 initRipple();
 initReveal();
 initThemeToggle();
 initOsDetect();
+initShowcase();
 
 // Mobile nav toggle
 const navToggle = document.getElementById("nav-toggle");

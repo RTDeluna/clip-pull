@@ -260,10 +260,37 @@ body::before {
   animation: shimmer-sweep 1.6s ease-in-out infinite;
 }
 
+/* App showcase carousel */
+.showcase-panel {
+  opacity: 0;
+  pointer-events: none;
+}
+.showcase-panel.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.showcase-tab__bar {
+  background: var(--input-bg);
+}
+.showcase-tab__fill {
+  width: 0%;
+}
+.showcase-tab.is-active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ripple,
   .shimmer::after {
     animation: none;
+  }
+  .showcase-panel {
+    transition: none !important;
+  }
+  .showcase-tab__fill {
+    transition: none !important;
   }
   .reveal {
     opacity: 1;
