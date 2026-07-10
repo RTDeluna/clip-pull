@@ -299,6 +299,7 @@ class DownloadOrchestrator:
             last_progress_time = 0.0
             smoothed_speed: Optional[float] = None
             prior_streams_bytes = 0
+            last_stream_key: Optional[str] = None
             last_stream_total: Optional[int] = None
             last_stage: Optional[str] = None
 
@@ -313,7 +314,8 @@ class DownloadOrchestrator:
                 expected_total_bytes = await loop.run_in_executor(None, self.probe_fn, url, referer)
 
             def progress_hook(d: dict) -> None:
-                nonlocal last_progress_time, smoothed_speed, prior_streams_bytes, last_stream_total, last_stage
+                nonlocal last_progress_time, smoothed_speed, prior_streams_bytes
+                nonlocal last_stream_key, last_stream_total, last_stage
                 if entry_id in self._pause_requested:
                     raise DownloadPaused()
 
@@ -336,14 +338,36 @@ class DownloadOrchestrator:
                 last_progress_time = now
                 downloaded = d.get("downloaded_bytes")
                 total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                info_dict = d.get("info_dict") or {}
+                stage = stream_stage(info_dict)
 
-                # A new total_bytes value (that isn't just the first reading)
-                # means yt-dlp has moved on to the next stream — fold the
-                # previous stream's full size into the running total so
-                # overall progress keeps climbing instead of resetting.
-                if total is not None and total != last_stream_total:
-                    if last_stream_total is not None:
-                        prior_streams_bytes += last_stream_total
+                # Identifies which underlying stream/format is currently
+                # downloading. Deliberately NOT based on `total`: for
+                # fragmented/HLS/DASH formats, total_bytes_estimate is
+                # continuously *refined* over the course of a single
+                # stream's download (it's an evolving estimate, not a fixed
+                # value) — comparing raw totals here previously mistook
+                # ordinary estimate fluctuations for "a new stream started,"
+                # which kept folding the same stream's size into
+                # prior_streams_bytes over and over, inflating the reported
+                # total far beyond the real combined file size.
+                stream_key = info_dict.get("format_id") or stage
+
+                # A genuine change in which stream is downloading — fold the
+                # just-finished stream's last known size into the running
+                # total so overall progress keeps climbing instead of
+                # resetting. Only fires once per real transition, since
+                # last_stream_key is updated to match immediately below.
+                if (
+                    stream_key is not None
+                    and last_stream_key is not None
+                    and stream_key != last_stream_key
+                    and last_stream_total is not None
+                ):
+                    prior_streams_bytes += last_stream_total
+                if stream_key is not None:
+                    last_stream_key = stream_key
+                if total is not None:
                     last_stream_total = total
 
                 # downloaded/total are always folded onto prior_streams_bytes,
@@ -368,7 +392,6 @@ class DownloadOrchestrator:
                 downloaded_size = format_bytes(overall_downloaded)
                 total_size = format_bytes(overall_total)
 
-                stage = stream_stage(d.get("info_dict") or {})
                 if stage != last_stage:
                     last_stage = stage
                     loop.call_soon_threadsafe(self.queue_manager.set_stage, entry_id, stage)

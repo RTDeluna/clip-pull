@@ -500,14 +500,17 @@ def test_progress_hook_computes_weighted_percent_across_two_streams_when_probe_a
 
     manager.update_progress = capturing_update_progress
 
+    video_info = {"vcodec": "avc1", "acodec": "none"}
+    audio_info = {"vcodec": "none", "acodec": "mp4a"}
+
     def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         # Video stream: 400 of 800, then completes at 800 of 800.
-        progress_hook({"status": "downloading", "downloaded_bytes": 400, "total_bytes": 800})
+        progress_hook({"status": "downloading", "downloaded_bytes": 400, "total_bytes": 800, "info_dict": video_info})
         time.sleep(0.26)  # clear the throttle window deterministically
-        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
+        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800, "info_dict": video_info})
         time.sleep(0.26)
         # Audio stream starts — total_bytes drops to 200, downloaded resets low.
-        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 200})
+        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 200, "info_dict": audio_info})
         return {"title": "Lesson 1"}
 
     # Probe reports the true combined total across both streams (800 + 200).
@@ -548,12 +551,18 @@ def test_progress_hook_tracks_cumulative_percent_and_size_across_streams_when_pr
 
     def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         # Video stream completes at 800 of 800.
-        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
+        progress_hook({
+            "status": "downloading", "downloaded_bytes": 800, "total_bytes": 800,
+            "info_dict": {"vcodec": "avc1", "acodec": "none"},
+        })
         time.sleep(0.26)  # clear the throttle window deterministically
         # Audio stream starts — its own total (200) is much smaller than the
         # video stream's. No probe_fn is injected, so there's no upfront
         # grand total; this exercises the fallback path.
-        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 200})
+        progress_hook({
+            "status": "downloading", "downloaded_bytes": 100, "total_bytes": 200,
+            "info_dict": {"vcodec": "none", "acodec": "mp4a"},
+        })
         return {"title": "Lesson 1"}
 
     orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
@@ -569,6 +578,63 @@ def test_progress_hook_tracks_cumulative_percent_and_size_across_streams_when_pr
     ]
 
 
+def test_progress_hook_does_not_inflate_total_when_estimate_fluctuates_within_one_stream():
+    # Regression test for a real bug: fragmented/HLS formats continuously
+    # *refine* total_bytes_estimate over the course of a single stream's
+    # download (it's an evolving estimate, not a fixed value). The same
+    # format (info_dict never changes) reports a jittery total across
+    # several ticks here — this must never be mistaken for a stream
+    # transition, or prior_streams_bytes balloons far past the real size
+    # (observed in production: a 16.7MB file reported as 595MB).
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+    ):
+        calls.append((downloaded_size, total_size))
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+        )
+
+    manager.update_progress = capturing_update_progress
+
+    video_info = {"vcodec": "avc1", "acodec": "none"}
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        # Same stream throughout (info_dict unchanged) — only the estimate
+        # jitters tick to tick, as yt-dlp's fragment downloader refines it.
+        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes_estimate": 500, "info_dict": video_info})
+        time.sleep(0.26)
+        progress_hook({"status": "downloading", "downloaded_bytes": 200, "total_bytes_estimate": 480, "info_dict": video_info})
+        time.sleep(0.26)
+        progress_hook({"status": "downloading", "downloaded_bytes": 300, "total_bytes_estimate": 510, "info_dict": video_info})
+        time.sleep(0.26)
+        progress_hook({"status": "downloading", "downloaded_bytes": 400, "total_bytes_estimate": 495, "info_dict": video_info})
+        time.sleep(0.26)
+        progress_hook({"status": "downloading", "downloaded_bytes": 500, "total_bytes": 500, "info_dict": video_info})
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    hook_calls = [c for c in calls if c[0] is not None]
+    # total_size tracks each tick's own (jittery) estimate directly — it
+    # never accumulates a "prior stream" on top, because there never was
+    # one. Before the fix, each fluctuation wrongly added another ~500B
+    # chunk, so five ticks would have inflated this well past 2000B.
+    assert hook_calls == [
+        ("100B", "500B"),
+        ("200B", "480B"),
+        ("300B", "510B"),
+        ("400B", "495B"),
+        ("500B", "500B"),
+    ]
+
+
 def test_download_entry_records_correct_combined_size_in_history_across_streams():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -578,9 +644,15 @@ def test_download_entry_records_correct_combined_size_in_history_across_streams(
         # Video stream completes, then a much-smaller audio stream starts —
         # no probe_fn, so History must still record the combined size, not
         # just the last (audio) stream's own total.
-        progress_hook({"status": "downloading", "downloaded_bytes": 800, "total_bytes": 800})
+        progress_hook({
+            "status": "downloading", "downloaded_bytes": 800, "total_bytes": 800,
+            "info_dict": {"vcodec": "avc1", "acodec": "none"},
+        })
         time.sleep(0.26)
-        progress_hook({"status": "downloading", "downloaded_bytes": 200, "total_bytes": 200})
+        progress_hook({
+            "status": "downloading", "downloaded_bytes": 200, "total_bytes": 200,
+            "info_dict": {"vcodec": "none", "acodec": "mp4a"},
+        })
         return {"title": "Lesson 1"}
 
     orchestrator = DownloadOrchestrator(
