@@ -215,8 +215,6 @@ startBtn.addEventListener("click", async () => {
 connectQueueSocket((event) => {
   if (event.type === "sync") {
     event.entries.forEach(renderRow);
-  } else if (event.type === "update") {
-    renderRow(event.entry);
   } else if (event.type === "update_batch") {
     event.entries.forEach(renderRow);
   } else if (event.type === "batch_complete") {
@@ -229,3 +227,19 @@ connectQueueSocket((event) => {
     }
   }
 });
+
+async function prefillDefaultOutputFolder() {
+  try {
+    const response = await fetch(`${API_BASE}/settings`);
+    if (!response.ok) return;
+    const settings = await response.json();
+    if (!outputFolderInput.value && settings.default_output_folder) {
+      outputFolderInput.value = settings.default_output_folder;
+    }
+  } catch {
+    // Backend not ready yet, or unreachable — Queue view still works,
+    // just without a prefilled folder; the user can still Browse manually.
+  }
+}
+
+prefillDefaultOutputFolder();
