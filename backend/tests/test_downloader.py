@@ -8,6 +8,7 @@ from downloader import (
     DownloadOrchestrator,
     build_ydl_opts,
     check_ffmpeg_available,
+    format_speed,
     is_referer_blocked_error,
     sanitize_filename,
 )
@@ -47,6 +48,61 @@ def test_check_ffmpeg_available_returns_true_when_on_path():
 def test_check_ffmpeg_available_returns_false_when_missing():
     with patch("shutil.which", return_value=None):
         assert check_ffmpeg_available() is False
+
+
+def test_format_speed_formats_bytes_per_second_human_readable():
+    assert format_speed(500) == "500.0B/s"
+    assert format_speed(1024) == "1.0KiB/s"
+    assert format_speed(1025453.0) == "1001.4KiB/s"
+
+
+def test_format_speed_returns_none_for_missing_or_zero_speed():
+    assert format_speed(None) is None
+    assert format_speed(0) is None
+
+
+def test_progress_hook_produces_clean_speed_and_integer_eta():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    # Capture every update_progress call — the orchestrator's own
+    # unconditional 100%-complete call (speed=None, eta=0) fires after
+    # fake_download returns, so we must check the value progress_hook
+    # itself reported, not the entry's final state.
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(entry_id, percent, speed, eta):
+        calls.append((percent, speed, eta))
+        original_update_progress(entry_id, percent, speed, eta)
+
+    manager.update_progress = capturing_update_progress
+
+    def fake_download(url, output_folder, referer, progress_hook):
+        # yt-dlp's real progress dict includes both a raw numeric "speed"
+        # and a pre-colorized "_speed_str" meant for terminal display (with
+        # ANSI escape codes) — we must use the former, not the latter, and
+        # "eta" can arrive as a float that needs to become a clean integer.
+        progress_hook(
+            {
+                "status": "downloading",
+                "downloaded_bytes": 50,
+                "total_bytes": 100,
+                "_speed_str": "\x1b[0;32m1001.42KiB/s\x1b[0m",
+                "speed": 1025453.0,
+                "eta": 17.08478471174968,
+            }
+        )
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    _, first_speed, first_eta = calls[0]
+    assert first_speed == "1001.4KiB/s"
+    assert "\x1b" not in first_speed
+    assert first_eta == 17
+    assert isinstance(first_eta, int)
 
 
 def test_download_entry_marks_done_and_sets_title_on_success():

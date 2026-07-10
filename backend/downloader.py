@@ -22,6 +22,21 @@ def check_ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+def format_speed(speed_bytes_per_sec: Optional[float]) -> Optional[str]:
+    """Human-readable speed string computed from yt-dlp's numeric `speed`
+    field. Deliberately does not use yt-dlp's own `_speed_str`, which embeds
+    ANSI terminal color codes meant for console output and renders as
+    mojibake in a browser/Electron UI."""
+    if not speed_bytes_per_sec or speed_bytes_per_sec <= 0:
+        return None
+    value = float(speed_bytes_per_sec)
+    for unit in ("B/s", "KiB/s", "MiB/s", "GiB/s"):
+        if value < 1024:
+            return f"{value:.1f}{unit}"
+        value /= 1024
+    return f"{value:.1f}TiB/s"
+
+
 def is_referer_blocked_error(exc: Exception) -> bool:
     return "403" in str(exc)
 
@@ -95,8 +110,9 @@ class DownloadOrchestrator:
                     if downloaded is not None and total
                     else 0.0
                 )
-                speed = d.get("_speed_str")
-                eta = d.get("eta")
+                speed = format_speed(d.get("speed"))
+                eta_raw = d.get("eta")
+                eta = int(eta_raw) if eta_raw is not None else None
                 loop.call_soon_threadsafe(
                     self.queue_manager.update_progress, entry_id, percent, speed, eta
                 )

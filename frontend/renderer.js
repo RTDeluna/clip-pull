@@ -27,17 +27,18 @@ function formatSpeed(speed) {
 
 function formatEta(eta) {
   if (eta === null || eta === undefined) return "--";
-  const minutes = Math.floor(eta / 60);
-  const seconds = eta % 60;
+  const totalSeconds = Math.max(0, Math.floor(eta));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function renderRow(entry) {
-  let row = rows.get(entry.id);
-  if (!row) {
-    row = document.createElement("li");
-    row.className = "queue-row";
-    row.innerHTML = `
+  let state = rows.get(entry.id);
+  if (!state) {
+    const el = document.createElement("li");
+    el.className = "queue-row";
+    el.innerHTML = `
       <div class="queue-row__top">
         <span class="queue-row__title"></span>
         <span class="queue-row__status"></span>
@@ -50,13 +51,25 @@ function renderRow(entry) {
       <div class="queue-row__error"></div>
       <button class="retry-btn" hidden>Retry</button>
     `;
-    queueList.appendChild(row);
-    rows.set(entry.id, row);
+    queueList.appendChild(el);
+    state = { el, maxPercent: 0 };
+    rows.set(entry.id, state);
 
-    row.querySelector(".retry-btn").addEventListener("click", () => {
+    el.querySelector(".retry-btn").addEventListener("click", () => {
       retryEntry(entry.id);
     });
   }
+  const row = state.el;
+
+  // Vimeo's high-quality formats download as separate video+audio streams,
+  // each reported by yt-dlp as its own 0-100% pass — without this, the bar
+  // visibly resets partway through. A retry resets the entry to "queued"
+  // with percent 0, which is the one case where going back to 0 is correct.
+  if (entry.status === "queued") {
+    state.maxPercent = 0;
+  }
+  const displayPercent = Math.max(entry.percent, state.maxPercent);
+  state.maxPercent = displayPercent;
 
   row.querySelector(".queue-row__title").textContent = entry.title || entry.url;
   const statusEl = row.querySelector(".queue-row__status");
@@ -65,7 +78,7 @@ function renderRow(entry) {
   if (entry.status === "done") statusEl.classList.add("queue-row__status--done");
   if (entry.status === "error") statusEl.classList.add("queue-row__status--error");
 
-  row.querySelector(".progress-fill").style.width = `${entry.percent}%`;
+  row.querySelector(".progress-fill").style.width = `${displayPercent}%`;
   row.querySelector(".queue-row__speed").textContent = formatSpeed(entry.speed);
   row.querySelector(".queue-row__eta").textContent = formatEta(entry.eta);
 
