@@ -3,14 +3,27 @@ import SectionHeading from "./SectionHeading.astro";
 import FeatureCard from "./FeatureCard.astro";
 import { features } from "../data/features";
 
-// Bento layout on a 6-column base at the lg breakpoint: "Built for Speed"
-// (the most content-rich card, with its own progress-bar decoration) gets
-// the wide hero tile in row one alongside a narrower partner, then three
-// equal tiles fill row two exactly — 2+4 / 2+2+2 = 12 of 12 cells, so
-// there's never a leftover gap the way a flat 3-col grid leaves one when
-// five items don't divide evenly by three. Below lg every card is span-1,
-// so the grid just falls back to the existing 1-/2-column stack.
-const spanByIndex = ["lg:col-span-2", "lg:col-span-4", "lg:col-span-2", "lg:col-span-2", "lg:col-span-2"];
+// A dedicated, gap-free bento arrangement at every breakpoint — not just a
+// bento layout at lg that degrades to a plain uniform stack below it:
+//
+// - Mobile (1 col): natural DOM order, nothing to arrange.
+// - Tablet (sm, 2 cols): "Built for Speed" (the richest card, with its own
+//   progress-bar decoration) is pulled visually to the front and spans
+//   both columns as a full-width hero row; the remaining four cards fill a
+//   clean 2x2 grid below it — 2 + 1+1+1+1 = 6 cells over 3 rows, exact.
+// - Desktop (lg, 6 cols): hero reverts to its natural DOM position (2nd)
+//   and sits beside a narrower "Paste & Go" in row one, then the other
+//   three cards fill row two evenly — 2+4 / 2+2+2 = 12 of 12 cells, exact.
+//
+// order-first/-none only reflows the visual grid position; DOM order (and
+// therefore reading/tab order) stays the sensible original sequence.
+const layoutByIndex = [
+  "lg:col-span-2", // Paste & Go
+  "sm:col-span-2 sm:order-first lg:col-span-4 lg:order-none", // Built for Speed (hero)
+  "lg:col-span-2", // Stay Organized
+  "lg:col-span-2", // Know What Happened
+  "lg:col-span-2", // Made to Fit
+];
 ---
 <section id="features" class="px-5 sm:px-8 py-16 sm:py-24">
   <div class="mx-auto max-w-6xl">
@@ -21,7 +34,7 @@ const spanByIndex = ["lg:col-span-2", "lg:col-span-4", "lg:col-span-2", "lg:col-
     />
     <div class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-5">
       {features.map((feature, index) => (
-        <FeatureCard feature={feature} index={index} class={spanByIndex[index] ?? ""} />
+        <FeatureCard feature={feature} index={index} class={layoutByIndex[index] ?? ""} />
       ))}
     </div>
   </div>
