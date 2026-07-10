@@ -285,8 +285,9 @@ body::before {
 
 .showcase-card__badge {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   gap: 6px;
