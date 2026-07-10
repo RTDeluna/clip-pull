@@ -27,6 +27,10 @@ def check_aria2c_available() -> bool:
     return shutil.which("aria2c") is not None
 
 
+def resolve_use_aria2c(enabled: bool) -> bool:
+    return enabled and check_aria2c_available()
+
+
 def format_speed(speed_bytes_per_sec: Optional[float]) -> Optional[str]:
     """Human-readable speed string computed from yt-dlp's numeric `speed`
     field. Deliberately does not use yt-dlp's own `_speed_str`, which embeds
@@ -64,12 +68,13 @@ def build_ydl_opts(
     output_template: str,
     referer: Optional[str],
     progress_hook: Callable[[dict], None],
+    concurrent_fragment_downloads: int = CONCURRENT_FRAGMENT_DOWNLOADS,
     use_aria2c: bool = False,
 ) -> dict:
     opts = {
         "format": "bestvideo+bestaudio/best",
         "outtmpl": output_template,
-        "concurrent_fragment_downloads": CONCURRENT_FRAGMENT_DOWNLOADS,
+        "concurrent_fragment_downloads": concurrent_fragment_downloads,
         "progress_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
@@ -88,14 +93,18 @@ def run_download(
     output_folder: str,
     referer: Optional[str],
     progress_hook: Callable[[dict], None],
+    concurrent_fragment_downloads: int = CONCURRENT_FRAGMENT_DOWNLOADS,
+    aria2c_enabled: bool = True,
 ) -> dict:
     """Blocking — must run in a thread executor. Real yt-dlp integration;
     verified manually against live Vimeo links (see design spec Testing section)."""
     import yt_dlp
 
     output_template = str(Path(output_folder) / "%(title)s [%(id)s].%(ext)s")
-    use_aria2c = check_aria2c_available()
-    opts = build_ydl_opts(output_template, referer, progress_hook, use_aria2c=use_aria2c)
+    use_aria2c = resolve_use_aria2c(aria2c_enabled)
+    opts = build_ydl_opts(
+        output_template, referer, progress_hook, concurrent_fragment_downloads, use_aria2c
+    )
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=True)
 
@@ -105,19 +114,36 @@ class DownloadOrchestrator:
         self,
         queue_manager: QueueManager,
         max_concurrent: int = MAX_CONCURRENT_DOWNLOADS,
-        download_fn: Callable[[str, str, Optional[str], Callable], dict] = run_download,
+        download_fn: Callable = run_download,
+        get_max_concurrent: Optional[Callable[[], int]] = None,
+        get_fragment_concurrency: Optional[Callable[[], int]] = None,
+        get_aria2c_enabled: Optional[Callable[[], bool]] = None,
+        record_history: Optional[Callable[..., None]] = None,
+        on_batch_complete: Optional[Callable[[str, dict], None]] = None,
     ):
         self.queue_manager = queue_manager
-        self.semaphore = asyncio.Semaphore(max_concurrent)
         self.download_fn = download_fn
+        self.get_max_concurrent = get_max_concurrent or (lambda: max_concurrent)
+        self.get_fragment_concurrency = get_fragment_concurrency or (
+            lambda: CONCURRENT_FRAGMENT_DOWNLOADS
+        )
+        self.get_aria2c_enabled = get_aria2c_enabled or (lambda: True)
+        self.record_history = record_history or (lambda **_: None)
+        self.on_batch_complete = on_batch_complete
 
     async def download_entry(
-        self, entry_id: str, output_folder: str, referer: Optional[str] = None
+        self,
+        entry_id: str,
+        output_folder: str,
+        referer: Optional[str] = None,
+        semaphore: Optional[asyncio.Semaphore] = None,
     ) -> None:
-        async with self.semaphore:
+        sem = semaphore if semaphore is not None else asyncio.Semaphore(self.get_max_concurrent())
+        async with sem:
             self.queue_manager.set_status(entry_id, "downloading")
             loop = asyncio.get_running_loop()
-            url = self.queue_manager.get(entry_id).url
+            entry = self.queue_manager.get(entry_id)
+            url = entry.url
             last_progress_time = 0.0
 
             def progress_hook(d: dict) -> None:
@@ -142,31 +168,53 @@ class DownloadOrchestrator:
                 total_size = format_bytes(total)
                 loop.call_soon_threadsafe(
                     self.queue_manager.update_progress,
-                    entry_id,
-                    percent,
-                    speed,
-                    eta,
-                    downloaded_size,
-                    total_size,
+                    entry_id, percent, speed, eta, downloaded_size, total_size,
                 )
 
             try:
                 info = await loop.run_in_executor(
-                    None, self.download_fn, url, output_folder, referer, progress_hook
+                    None,
+                    self.download_fn,
+                    url,
+                    output_folder,
+                    referer,
+                    progress_hook,
+                    self.get_fragment_concurrency(),
+                    self.get_aria2c_enabled(),
                 )
                 # progress_hook's last update is scheduled via
                 # call_soon_threadsafe from the worker thread and isn't
                 # guaranteed to be processed before this coroutine resumes.
                 # Yielding once lets any already-scheduled callback run first,
-                # so the completion state below is always the authoritative,
-                # final word rather than possibly being overwritten by a
-                # late-arriving progress tick.
+                # so the completion state below is always authoritative.
                 await asyncio.sleep(0)
+
+                final_total_size = self.queue_manager.get(entry_id).total_size
                 title = info.get("title") if isinstance(info, dict) else None
+                output_path = None
+                try:
+                    if isinstance(info, dict):
+                        downloads = info.get("requested_downloads") or []
+                        if downloads:
+                            output_path = downloads[-1].get("filepath")
+                except Exception:
+                    output_path = None
+
                 if title:
                     self.queue_manager.set_title(entry_id, title)
                 self.queue_manager.update_progress(entry_id, 100.0, None, 0)
                 self.queue_manager.set_status(entry_id, "done")
+                self.record_history(
+                    entry_id=entry_id,
+                    batch_id=entry.batch_id,
+                    url=url,
+                    title=title,
+                    output_path=output_path,
+                    total_size=final_total_size,
+                    status="done",
+                    error_reason=None,
+                    retry_count=entry.retry_count,
+                )
             except Exception as exc:
                 reason = (
                     REFERER_BLOCKED_MESSAGE
@@ -174,13 +222,30 @@ class DownloadOrchestrator:
                     else str(exc)
                 )
                 self.queue_manager.set_error(entry_id, reason)
+                self.record_history(
+                    entry_id=entry_id,
+                    batch_id=entry.batch_id,
+                    url=url,
+                    title=entry.title,
+                    output_path=None,
+                    total_size=None,
+                    status="error",
+                    error_reason=reason,
+                    retry_count=entry.retry_count,
+                )
+            finally:
+                if entry.batch_id and self.on_batch_complete:
+                    if self.queue_manager.is_batch_complete(entry.batch_id):
+                        summary = self.queue_manager.batch_summary(entry.batch_id)
+                        self.on_batch_complete(entry.batch_id, summary)
 
     async def download_all(
         self, entry_ids: list[str], output_folder: str, referer: Optional[str] = None
     ) -> None:
+        semaphore = asyncio.Semaphore(self.get_max_concurrent())
         await asyncio.gather(
             *(
-                self.download_entry(entry_id, output_folder, referer)
+                self.download_entry(entry_id, output_folder, referer, semaphore)
                 for entry_id in entry_ids
             )
         )

@@ -13,6 +13,7 @@ from downloader import (
     format_bytes,
     format_speed,
     is_referer_blocked_error,
+    resolve_use_aria2c,
     sanitize_filename,
 )
 
@@ -141,7 +142,7 @@ def test_progress_hook_produces_clean_speed_and_integer_eta():
 
     manager.update_progress = capturing_update_progress
 
-    def fake_download(url, output_folder, referer, progress_hook):
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         # yt-dlp's real progress dict includes both a raw numeric "speed"
         # and a pre-colorized "_speed_str" meant for terminal display (with
         # ANSI escape codes) — we must use the former, not the latter, and
@@ -194,7 +195,7 @@ def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
 
     manager.update_progress = capturing_update_progress
 
-    def fake_download(url, output_folder, referer, progress_hook):
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         progress_hook(
             {"status": "downloading", "downloaded_bytes": 50, "total_bytes": 100}
         )
@@ -215,7 +216,7 @@ def test_download_entry_marks_done_and_sets_title_on_success():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
 
-    def fake_download(url, output_folder, referer, progress_hook):
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         progress_hook({"status": "downloading", "downloaded_bytes": 50, "total_bytes": 100})
         return {"title": "Lesson 1"}
 
@@ -232,7 +233,7 @@ def test_download_entry_sets_referer_blocked_message_on_403():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
 
-    def failing_download(url, output_folder, referer, progress_hook):
+    def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         raise Exception("HTTP Error 403: Forbidden")
 
     orchestrator = DownloadOrchestrator(manager, download_fn=failing_download)
@@ -260,7 +261,7 @@ def test_progress_hook_throttles_rapid_updates():
 
     manager.update_progress = counting_update_progress
 
-    def fake_download(url, output_folder, referer, progress_hook):
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         # Simulate yt-dlp firing many rapid progress ticks with no delay between
         # them (as it can several times per second). All of these fall within a
         # single 0.25s throttle window, so this is deterministic: no time.sleep,
@@ -293,7 +294,7 @@ def test_download_all_never_exceeds_max_concurrency():
     counter_lock = threading.Lock()
     counters = {"active": 0, "peak": 0}
 
-    def slow_download(url, output_folder, referer, progress_hook):
+    def slow_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
         with counter_lock:
             counters["active"] += 1
             counters["peak"] = max(counters["peak"], counters["active"])
@@ -307,3 +308,147 @@ def test_download_all_never_exceeds_max_concurrency():
 
     assert counters["peak"] == 2
     assert all(manager.get(e.id).status == "done" for e in entries)
+
+
+def test_resolve_use_aria2c_true_when_enabled_and_available():
+    with patch("shutil.which", return_value="C:/aria2/aria2c.exe"):
+        assert resolve_use_aria2c(True) is True
+
+
+def test_resolve_use_aria2c_false_when_disabled_even_if_available():
+    with patch("shutil.which", return_value="C:/aria2/aria2c.exe"):
+        assert resolve_use_aria2c(False) is False
+
+
+def test_resolve_use_aria2c_false_when_enabled_but_not_available():
+    with patch("shutil.which", return_value=None):
+        assert resolve_use_aria2c(True) is False
+
+
+def test_build_ydl_opts_uses_injected_fragment_concurrency_value():
+    opts = build_ydl_opts(
+        "out/%(title)s.%(ext)s", None, lambda d: None, concurrent_fragment_downloads=16
+    )
+    assert opts["concurrent_fragment_downloads"] == 16
+
+
+def test_build_ydl_opts_defaults_fragment_concurrency_to_module_constant():
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["concurrent_fragment_downloads"] == CONCURRENT_FRAGMENT_DOWNLOADS
+
+
+def test_download_all_resolves_max_concurrent_from_callable_once_per_call():
+    manager = QueueManager()
+    entries = manager.add_entries([f"https://vimeo.com/{i}" for i in range(4)])
+    counter_lock = threading.Lock()
+    counters = {"active": 0, "peak": 0}
+
+    def slow_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        with counter_lock:
+            counters["active"] += 1
+            counters["peak"] = max(counters["peak"], counters["active"])
+        time.sleep(0.05)
+        with counter_lock:
+            counters["active"] -= 1
+        return {"title": "x"}
+
+    call_count = {"n": 0}
+
+    def get_max_concurrent():
+        call_count["n"] += 1
+        return 1
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=slow_download, get_max_concurrent=get_max_concurrent
+    )
+    asyncio.run(orchestrator.download_all([e.id for e in entries], "/tmp/out"))
+
+    assert counters["peak"] == 1
+    assert call_count["n"] == 1
+
+
+def test_download_entry_records_history_on_success():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"], batch_id="b1")
+    recorded = []
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 100})
+        return {
+            "title": "Lesson 1",
+            "requested_downloads": [{"filepath": "C:/out/Lesson 1.mp4"}],
+        }
+
+    orchestrator = DownloadOrchestrator(
+        manager,
+        download_fn=fake_download,
+        record_history=lambda **kwargs: recorded.append(kwargs),
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert len(recorded) == 1
+    assert recorded[0]["status"] == "done"
+    assert recorded[0]["url"] == "https://vimeo.com/111"
+    assert recorded[0]["output_path"] == "C:/out/Lesson 1.mp4"
+    assert recorded[0]["total_size"] == "100B"
+    assert recorded[0]["batch_id"] == "b1"
+
+
+def test_download_entry_records_history_on_error():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    recorded = []
+
+    def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        raise Exception("HTTP Error 403: Forbidden")
+
+    orchestrator = DownloadOrchestrator(
+        manager,
+        download_fn=failing_download,
+        record_history=lambda **kwargs: recorded.append(kwargs),
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert len(recorded) == 1
+    assert recorded[0]["status"] == "error"
+    assert "referer" in recorded[0]["error_reason"].lower()
+
+
+def test_download_all_fires_on_batch_complete_exactly_once_for_shared_batch_id():
+    manager = QueueManager()
+    entries = manager.add_entries(["https://vimeo.com/1", "https://vimeo.com/2"], batch_id="b1")
+    completions = []
+
+    def mixed_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        if url.endswith("/2"):
+            raise Exception("failed")
+        return {"title": "ok"}
+
+    orchestrator = DownloadOrchestrator(
+        manager,
+        download_fn=mixed_download,
+        on_batch_complete=lambda batch_id, summary: completions.append((batch_id, summary)),
+    )
+    asyncio.run(orchestrator.download_all([e.id for e in entries], "/tmp/out"))
+
+    assert len(completions) == 1
+    assert completions[0][0] == "b1"
+    assert completions[0][1] == {"done": 1, "error": 1}
+
+
+def test_entries_without_batch_id_never_trigger_on_batch_complete():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/1"])
+    completions = []
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "ok"}
+
+    orchestrator = DownloadOrchestrator(
+        manager,
+        download_fn=fake_download,
+        on_batch_complete=lambda batch_id, summary: completions.append((batch_id, summary)),
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert completions == []
