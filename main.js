@@ -42,6 +42,22 @@ function spawnBackend() {
   });
 }
 
+// backendProcess.kill() only signals that one PID — on Windows it doesn't
+// reliably tear down the process tree, so if a download was mid-flight and
+// spawned aria2c/ffmpeg as children, those (and sometimes the backend exe
+// itself) can survive after the app window closes. taskkill's /T flag kills
+// the whole tree; plain .kill() is fine on macOS/Linux, which use real
+// signals.
+function killBackend() {
+  if (!backendProcess) return;
+  if (process.platform === "win32") {
+    exec(`taskkill /pid ${backendProcess.pid} /f /t`);
+  } else {
+    backendProcess.kill();
+  }
+  backendProcess = null;
+}
+
 function waitForBackend(retriesLeft, onReady) {
   if (retriesLeft <= 0) {
     console.error("Backend did not become ready in time.");
@@ -202,16 +218,12 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (backendProcess) {
-    backendProcess.kill();
-  }
+  killBackend();
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
 app.on("before-quit", () => {
-  if (backendProcess) {
-    backendProcess.kill();
-  }
+  killBackend();
 });
