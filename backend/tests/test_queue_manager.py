@@ -17,6 +17,26 @@ def test_get_returns_entry_by_id():
     assert manager.get(entry.id) is entry
 
 
+def test_new_entry_defaults_stage_to_none():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    assert entry.stage is None
+
+
+def test_set_stage_updates_entry_stage():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.set_stage(entry.id, "video")
+    assert manager.get(entry.id).stage == "video"
+
+
+def test_to_dict_includes_stage_field():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.set_stage(entry.id, "audio")
+    assert manager.get(entry.id).to_dict()["stage"] == "audio"
+
+
 def test_set_status_updates_entry_status():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -77,16 +97,19 @@ def test_update_progress_defaults_size_fields_to_none_when_omitted():
 def test_set_error_sets_status_and_reason():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.set_stage(entry.id, "video")
     manager.set_error(entry.id, "Blocked — referer required")
     updated = manager.get(entry.id)
     assert updated.status == "error"
     assert updated.error_reason == "Blocked — referer required"
+    assert updated.stage is None
 
 
 def test_mark_paused_sets_status_and_clears_speed_eta_but_keeps_progress():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
     manager.update_progress(entry.id, 42.0, "1MiB/s", 30, "42MB", "100MB", 1048576.0)
+    manager.set_stage(entry.id, "audio")
     manager.mark_paused(entry.id)
     updated = manager.get(entry.id)
     assert updated.status == "paused"
@@ -96,12 +119,14 @@ def test_mark_paused_sets_status_and_clears_speed_eta_but_keeps_progress():
     assert updated.percent == 42.0
     assert updated.downloaded_size == "42MB"
     assert updated.total_size == "100MB"
+    assert updated.stage is None
 
 
 def test_reset_for_retry_clears_progress_and_increments_retry_count():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
     manager.update_progress(entry.id, 50.0, "1MiB/s", 10, "50MB", "100MB", 1048576.0)
+    manager.set_stage(entry.id, "video")
     manager.set_error(entry.id, "some error")
     manager.reset_for_retry(entry.id)
     updated = manager.get(entry.id)
@@ -113,6 +138,7 @@ def test_reset_for_retry_clears_progress_and_increments_retry_count():
     assert updated.downloaded_size is None
     assert updated.total_size is None
     assert updated.error_reason is None
+    assert updated.stage is None
     assert updated.retry_count == 1
 
 

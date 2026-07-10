@@ -15,6 +15,7 @@ class QueueEntry:
     eta: Optional[int] = None
     downloaded_size: Optional[str] = None
     total_size: Optional[str] = None
+    stage: Optional[str] = None
     error_reason: Optional[str] = None
     retry_count: int = 0
     batch_id: Optional[str] = None
@@ -33,6 +34,7 @@ class QueueEntry:
             "eta": self.eta,
             "downloaded_size": self.downloaded_size,
             "total_size": self.total_size,
+            "stage": self.stage,
             "error_reason": self.error_reason,
             "retry_count": self.retry_count,
             "batch_id": self.batch_id,
@@ -137,10 +139,16 @@ class QueueManager:
         entry.total_size = total_size
         self._notify(entry)
 
+    def set_stage(self, entry_id: str, stage: Optional[str]) -> None:
+        entry = self._entries[entry_id]
+        entry.stage = stage
+        self._notify(entry)
+
     def set_error(self, entry_id: str, reason: str) -> None:
         entry = self._entries[entry_id]
         entry.status = "error"
         entry.error_reason = reason
+        entry.stage = None
         self._notify(entry)
 
     def mark_paused(self, entry_id: str) -> None:
@@ -152,6 +160,7 @@ class QueueManager:
         entry.speed = None
         entry.speed_bytes = None
         entry.eta = None
+        entry.stage = None
         self._notify(entry)
 
     def reset_for_retry(self, entry_id: str) -> None:
@@ -163,6 +172,7 @@ class QueueManager:
         entry.eta = None
         entry.downloaded_size = None
         entry.total_size = None
+        entry.stage = None
         entry.error_reason = None
         entry.retry_count += 1
         self._notify(entry)
