@@ -17,19 +17,25 @@ const registry = {
 interface Props {
   feature: FeatureCategory;
   index: number;
+  class?: string;
 }
-const { feature, index } = Astro.props;
+const { feature, index, class: className = "" } = Astro.props;
 const Icon = registry[feature.icon as keyof typeof registry];
 const isSpeedCard = feature.icon === "IconBolt";
 ---
 <div
-  class="reveal glass rounded-panel p-6 sm:p-7 flex flex-col gap-4"
+  class:list={["reveal glass rounded-panel p-6 sm:p-7 flex flex-col gap-4", className]}
   style={`transition-delay:${index * 70}ms`}
 >
-  <div class="w-11 h-11 rounded-card gradient-accent grid place-items-center shrink-0">
-    <Icon class="w-5 h-5 text-on-accent" />
+  <div
+    class:list={[
+      "rounded-card gradient-accent grid place-items-center shrink-0",
+      isSpeedCard ? "w-12 h-12" : "w-11 h-11",
+    ]}
+  >
+    <Icon class:list={[isSpeedCard ? "w-6 h-6" : "w-5 h-5", "text-on-accent"]} />
   </div>
-  <h3 class="text-lg font-bold text-text">{feature.title}</h3>
+  <h3 class:list={["font-bold text-text", isSpeedCard ? "text-xl" : "text-lg"]}>{feature.title}</h3>
   <ul class="flex flex-col gap-2.5 text-sm text-text-dim leading-relaxed">
     {feature.bullets.map((bullet) => (
       <li class="flex gap-2.5">
