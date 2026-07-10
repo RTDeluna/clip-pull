@@ -4,6 +4,7 @@ const BACKEND_PORT = window.api?.backendPort ?? 8934;
 const API_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
 
 const urlsInput = document.getElementById("urls");
+const urlsGutter = document.getElementById("urls-gutter");
 const invalidLinesEl = document.getElementById("invalid-lines");
 const outputFolderInput = document.getElementById("output-folder");
 const browseBtn = document.getElementById("browse-btn");
@@ -112,6 +113,41 @@ function updateSummary() {
     : "";
 }
 
+function isSupportedUrl(str) {
+  try {
+    const url = new URL(str.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function renderGutter() {
+  const lines = urlsInput.value.split("\n");
+  urlsGutter.innerHTML = lines
+    .map((line, i) => {
+      const trimmed = line.trim();
+      let dotClass = "urls-gutter__dot";
+      if (trimmed) {
+        dotClass += isSupportedUrl(trimmed)
+          ? " urls-gutter__dot--valid"
+          : " urls-gutter__dot--invalid";
+      }
+      return `<div class="urls-gutter__line"><span class="${dotClass}"></span>${i + 1}</div>`;
+    })
+    .join("");
+  urlsGutter.scrollTop = urlsInput.scrollTop;
+}
+
+urlsInput.addEventListener("input", renderGutter);
+urlsInput.addEventListener("scroll", () => {
+  urlsGutter.scrollTop = urlsInput.scrollTop;
+});
+new ResizeObserver(() => {
+  urlsGutter.style.height = `${urlsInput.clientHeight}px`;
+}).observe(urlsInput);
+renderGutter();
+
 async function retryEntry(entryId) {
   try {
     await fetch(`${API_BASE}/queue/${entryId}/retry`, {
@@ -158,6 +194,7 @@ startBtn.addEventListener("click", async () => {
 
     body.entries.forEach(renderRow);
     urlsInput.value = "";
+    renderGutter();
   } catch (error) {
     invalidLinesEl.hidden = false;
     invalidLinesEl.textContent = "Failed to reach the backend: " + error.message;

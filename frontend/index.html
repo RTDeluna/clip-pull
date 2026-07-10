@@ -14,12 +14,16 @@
 
     <section class="panel">
       <label class="field-label" for="urls">Video links (one per line)</label>
-      <textarea
-        id="urls"
-        class="urls-input"
-        rows="6"
-        placeholder="https://vimeo.com/123456789&#10;https://www.loom.com/share/abcd1234ef567890"
-      ></textarea>
+      <div class="urls-editor">
+        <div id="urls-gutter" class="urls-gutter" aria-hidden="true"></div>
+        <textarea
+          id="urls"
+          class="urls-input"
+          spellcheck="false"
+          wrap="off"
+          placeholder="https://vimeo.com/123456789&#10;https://www.loom.com/share/abcd1234ef567890"
+        ></textarea>
+      </div>
       <div id="invalid-lines" class="invalid-lines" hidden></div>
 
       <div class="field-row">
