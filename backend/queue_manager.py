@@ -12,6 +12,8 @@ class QueueEntry:
     percent: float = 0.0
     speed: Optional[str] = None
     eta: Optional[int] = None
+    downloaded_size: Optional[str] = None
+    total_size: Optional[str] = None
     error_reason: Optional[str] = None
     retry_count: int = 0
 
@@ -24,6 +26,8 @@ class QueueEntry:
             "percent": self.percent,
             "speed": self.speed,
             "eta": self.eta,
+            "downloaded_size": self.downloaded_size,
+            "total_size": self.total_size,
             "error_reason": self.error_reason,
             "retry_count": self.retry_count,
         }
@@ -71,11 +75,15 @@ class QueueManager:
         percent: float,
         speed: Optional[str],
         eta: Optional[int],
+        downloaded_size: Optional[str] = None,
+        total_size: Optional[str] = None,
     ) -> None:
         entry = self._entries[entry_id]
         entry.percent = percent
         entry.speed = speed
         entry.eta = eta
+        entry.downloaded_size = downloaded_size
+        entry.total_size = total_size
         self._notify(entry)
 
     def set_error(self, entry_id: str, reason: str) -> None:
@@ -90,6 +98,8 @@ class QueueManager:
         entry.percent = 0.0
         entry.speed = None
         entry.eta = None
+        entry.downloaded_size = None
+        entry.total_size = None
         entry.error_reason = None
         entry.retry_count += 1
         self._notify(entry)

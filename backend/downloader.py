@@ -42,6 +42,20 @@ def format_speed(speed_bytes_per_sec: Optional[float]) -> Optional[str]:
     return f"{value:.1f}TiB/s"
 
 
+def format_bytes(num_bytes: Optional[float]) -> Optional[str]:
+    """Human-readable byte-count string (e.g. '45.2MB'). Unlike format_speed,
+    0 is a legitimate value (a fresh download starts at 0 of N bytes) and
+    formats as '0B' — only a genuinely missing reading (None) returns None."""
+    if num_bytes is None or num_bytes < 0:
+        return None
+    value = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024:
+            return f"{int(value)}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+        value /= 1024
+    return f"{value:.1f}TB"
+
+
 def is_referer_blocked_error(exc: Exception) -> bool:
     return "403" in str(exc)
 
@@ -124,8 +138,16 @@ class DownloadOrchestrator:
                 speed = format_speed(d.get("speed"))
                 eta_raw = d.get("eta")
                 eta = int(eta_raw) if eta_raw is not None else None
+                downloaded_size = format_bytes(downloaded)
+                total_size = format_bytes(total)
                 loop.call_soon_threadsafe(
-                    self.queue_manager.update_progress, entry_id, percent, speed, eta
+                    self.queue_manager.update_progress,
+                    entry_id,
+                    percent,
+                    speed,
+                    eta,
+                    downloaded_size,
+                    total_size,
                 )
 
             try:

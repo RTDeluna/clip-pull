@@ -30,7 +30,13 @@ function formatEta(eta) {
   const totalSeconds = Math.max(0, Math.floor(eta));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return `${minutes}:${String(seconds).padStart(2, "0")} left`;
+}
+
+function formatSizeLine(entry, displayPercent) {
+  const downloaded = entry.downloaded_size || "--";
+  const total = entry.total_size || "--";
+  return `${downloaded} / ${total} · ${Math.round(displayPercent)}%`;
 }
 
 function renderRow(entry) {
@@ -44,9 +50,10 @@ function renderRow(entry) {
         <span class="queue-row__status"></span>
       </div>
       <div class="progress-track"><div class="progress-fill"></div></div>
+      <div class="queue-row__size"></div>
       <div class="queue-row__meta">
         <span class="queue-row__speed"></span>
-        <span class="queue-row__eta"></span>
+        <span class="queue-row__eta" title="Estimated time remaining"></span>
       </div>
       <div class="queue-row__error"></div>
       <button class="retry-btn" hidden>Retry</button>
@@ -79,6 +86,7 @@ function renderRow(entry) {
   if (entry.status === "error") statusEl.classList.add("queue-row__status--error");
 
   row.querySelector(".progress-fill").style.width = `${displayPercent}%`;
+  row.querySelector(".queue-row__size").textContent = formatSizeLine(entry, displayPercent);
   row.querySelector(".queue-row__speed").textContent = formatSpeed(entry.speed);
   row.querySelector(".queue-row__eta").textContent = formatEta(entry.eta);
 

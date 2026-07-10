@@ -10,6 +10,7 @@ from downloader import (
     build_ydl_opts,
     check_aria2c_available,
     check_ffmpeg_available,
+    format_bytes,
     format_speed,
     is_referer_blocked_error,
     sanitize_filename,
@@ -103,6 +104,22 @@ def test_format_speed_returns_none_for_missing_or_zero_speed():
     assert format_speed(0) is None
 
 
+def test_format_bytes_formats_human_readable():
+    assert format_bytes(500) == "500B"
+    assert format_bytes(1024) == "1.0KB"
+    assert format_bytes(1048576) == "1.0MB"
+
+
+def test_format_bytes_returns_zero_string_for_zero_bytes():
+    # Unlike format_speed(0), which is None (no speed reading yet), 0 of N
+    # bytes downloaded is a legitimate, meaningful progress state.
+    assert format_bytes(0) == "0B"
+
+
+def test_format_bytes_returns_none_for_missing_value():
+    assert format_bytes(None) is None
+
+
 def test_progress_hook_produces_clean_speed_and_integer_eta():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -114,9 +131,13 @@ def test_progress_hook_produces_clean_speed_and_integer_eta():
     calls = []
     original_update_progress = manager.update_progress
 
-    def capturing_update_progress(entry_id, percent, speed, eta):
-        calls.append((percent, speed, eta))
-        original_update_progress(entry_id, percent, speed, eta)
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None
+    ):
+        calls.append((percent, speed, eta, downloaded_size, total_size))
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size
+        )
 
     manager.update_progress = capturing_update_progress
 
@@ -140,11 +161,32 @@ def test_progress_hook_produces_clean_speed_and_integer_eta():
     orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
     asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
 
-    _, first_speed, first_eta = calls[0]
+    _, first_speed, first_eta, first_downloaded_size, first_total_size = calls[0]
     assert first_speed == "1001.4KiB/s"
     assert "\x1b" not in first_speed
     assert first_eta == 17
     assert isinstance(first_eta, int)
+    assert first_downloaded_size == "50B"
+    assert first_total_size == "100B"
+
+
+def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def fake_download(url, output_folder, referer, progress_hook):
+        progress_hook(
+            {"status": "downloading", "downloaded_bytes": 50, "total_bytes": 100}
+        )
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(manager, download_fn=fake_download)
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    updated = manager.get(entry.id)
+    assert updated.status == "done"
+    assert updated.downloaded_size is None
+    assert updated.total_size is None
 
 
 def test_download_entry_marks_done_and_sets_title_on_success():
@@ -186,9 +228,13 @@ def test_progress_hook_throttles_rapid_updates():
     call_count = {"n": 0}
     original_update_progress = manager.update_progress
 
-    def counting_update_progress(entry_id, percent, speed, eta):
+    def counting_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None
+    ):
         call_count["n"] += 1
-        original_update_progress(entry_id, percent, speed, eta)
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size
+        )
 
     manager.update_progress = counting_update_progress
 

@@ -41,6 +41,24 @@ def test_update_progress_sets_percent_speed_eta():
     assert updated.eta == 30
 
 
+def test_update_progress_sets_downloaded_and_total_size():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.5, "1.2MiB/s", 30, "45.2MB", "120.4MB")
+    updated = manager.get(entry.id)
+    assert updated.downloaded_size == "45.2MB"
+    assert updated.total_size == "120.4MB"
+
+
+def test_update_progress_defaults_size_fields_to_none_when_omitted():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.5, "1.2MiB/s", 30)
+    updated = manager.get(entry.id)
+    assert updated.downloaded_size is None
+    assert updated.total_size is None
+
+
 def test_set_error_sets_status_and_reason():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -53,7 +71,7 @@ def test_set_error_sets_status_and_reason():
 def test_reset_for_retry_clears_progress_and_increments_retry_count():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
-    manager.update_progress(entry.id, 50.0, "1MiB/s", 10)
+    manager.update_progress(entry.id, 50.0, "1MiB/s", 10, "50MB", "100MB")
     manager.set_error(entry.id, "some error")
     manager.reset_for_retry(entry.id)
     updated = manager.get(entry.id)
@@ -61,6 +79,8 @@ def test_reset_for_retry_clears_progress_and_increments_retry_count():
     assert updated.percent == 0.0
     assert updated.speed is None
     assert updated.eta is None
+    assert updated.downloaded_size is None
+    assert updated.total_size is None
     assert updated.error_reason is None
     assert updated.retry_count == 1
 

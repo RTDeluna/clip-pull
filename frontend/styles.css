@@ -228,6 +228,13 @@ body {
   transition: width 0.2s ease-out;
 }
 
+.queue-row__size {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .queue-row__meta {
   display: flex;
   justify-content: space-between;
