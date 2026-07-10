@@ -23,11 +23,11 @@ def _make_client():
     app.include_router(
         build_queue_router(queue_manager, orchestrator, history_store, settings_store, state)
     )
-    return TestClient(app), queue_manager, history_store, settings_store
+    return TestClient(app), queue_manager, orchestrator, history_store, settings_store
 
 
 def test_post_queue_creates_entries_for_valid_urls():
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     response = client.post(
         "/queue",
         json={
@@ -43,7 +43,7 @@ def test_post_queue_creates_entries_for_valid_urls():
 
 
 def test_post_queue_reports_invalid_lines_without_blocking_valid_ones():
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     response = client.post(
         "/queue",
         json={"urls_text": "https://vimeo.com/111\nnot a url", "output_folder": "C:/downloads"},
@@ -54,7 +54,7 @@ def test_post_queue_reports_invalid_lines_without_blocking_valid_ones():
 
 
 def test_post_queue_accepts_non_vimeo_urls_like_loom():
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     response = client.post(
         "/queue",
         json={"urls_text": "https://www.loom.com/share/abc123", "output_folder": "C:/downloads"},
@@ -65,7 +65,7 @@ def test_post_queue_accepts_non_vimeo_urls_like_loom():
 
 
 def test_get_queue_returns_current_entries():
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     client.post(
         "/queue", json={"urls_text": "https://vimeo.com/333", "output_folder": "C:/downloads"}
     )
@@ -75,7 +75,7 @@ def test_get_queue_returns_current_entries():
 
 
 def test_retry_entry_resets_status_to_queued():
-    client, queue_manager, _, _ = _make_client()
+    client, queue_manager, _, _, _ = _make_client()
     post_response = client.post(
         "/queue", json={"urls_text": "https://vimeo.com/444", "output_folder": "C:/downloads"}
     )
@@ -88,7 +88,7 @@ def test_retry_entry_resets_status_to_queued():
 
 
 def test_post_queue_flags_previously_downloaded_urls():
-    client, _, history_store, _ = _make_client()
+    client, _, _, history_store, _ = _make_client()
     history_store.record(
         entry_id="e0", batch_id=None, url="https://vimeo.com/999", title="Old",
         output_path="C:/out/Old.mp4", total_size="10MB", status="done",
@@ -102,7 +102,7 @@ def test_post_queue_flags_previously_downloaded_urls():
 
 
 def test_post_queue_skips_duplicates_when_setting_enabled():
-    client, _, history_store, settings_store = _make_client()
+    client, _, _, history_store, settings_store = _make_client()
     settings_store.update(skip_duplicates=True)
     history_store.record(
         entry_id="e0", batch_id=None, url="https://vimeo.com/999", title="Old",
@@ -118,7 +118,7 @@ def test_post_queue_skips_duplicates_when_setting_enabled():
 
 
 def test_post_queue_generates_shared_batch_id_for_all_entries_in_one_request():
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     response = client.post(
         "/queue",
         json={
@@ -132,7 +132,7 @@ def test_post_queue_generates_shared_batch_id_for_all_entries_in_one_request():
 
 
 def test_post_queue_creates_subfolder_when_subfolder_name_provided(tmp_path):
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     base_folder = tmp_path / "downloads"
     base_folder.mkdir()
     response = client.post(
@@ -150,7 +150,7 @@ def test_post_queue_creates_subfolder_when_subfolder_name_provided(tmp_path):
 
 
 def test_post_queue_flat_folder_when_subfolder_omitted(tmp_path):
-    client, _, _, _ = _make_client()
+    client, _, _, _, _ = _make_client()
     base_folder = tmp_path / "downloads"
     base_folder.mkdir()
     response = client.post(
@@ -161,17 +161,34 @@ def test_post_queue_flat_folder_when_subfolder_omitted(tmp_path):
 
 
 def test_retry_entry_uses_entrys_own_output_folder_not_global_state():
-    client, queue_manager, _, _ = _make_client()
+    client, queue_manager, orchestrator, _, _ = _make_client()
+
+    # Track the output_folder argument passed to download_all during retry
+    calls = []
+
+    async def recording_download_all(entry_ids, output_folder, referer=None):
+        calls.append(output_folder)
+
+    # Swap the recording fake onto this test's orchestrator instance
+    orchestrator.download_all = recording_download_all
+
+    # Create first entry with folder-a and put it in error state
     first = client.post(
         "/queue", json={"urls_text": "https://vimeo.com/1", "output_folder": "C:/folder-a"}
     )
     entry_id = first.json()["entries"][0]["id"]
     queue_manager.set_error(entry_id, "boom")
 
+    # Create a second entry with folder-b (to test that we use the entry's own folder, not global state)
     client.post(
         "/queue", json={"urls_text": "https://vimeo.com/2", "output_folder": "C:/folder-b"}
     )
 
+    # Retry the first entry
     response = client.post(f"/queue/{entry_id}/retry", json={})
     assert response.status_code == 202
-    assert queue_manager.get(entry_id).output_folder == "C:/folder-a"
+
+    # Assert that the output_folder argument captured from the retry's download_all call
+    # matches the entry's original folder, not the global state (folder-b)
+    assert len(calls) > 0, "download_all was not called during retry"
+    assert calls[-1] == "C:/folder-a", f"Expected 'C:/folder-a' but got '{calls[-1]}'"
