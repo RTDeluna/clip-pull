@@ -145,7 +145,6 @@ function renderRow(entry, { announceCompletion = true } = {}) {
       el,
       maxPercent: 0,
       lastStatus: null,
-      lastTotalSize: null,
       displayedPercent: 0,
       targetPercent: undefined,
       lastEntry: null,
