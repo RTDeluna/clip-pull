@@ -1,45 +1,43 @@
 ---
 import { Image } from "astro:assets";
 import SectionHeading from "./SectionHeading.astro";
-import dashboardScreenshot from "../assets/dashboard-hero.png";
+import queueScreenshot from "../assets/dashboard-hero.png";
+import historyScreenshot from "../assets/showcase-history.png";
+import settingsScreenshot from "../assets/showcase-settings.png";
+import extensionScreenshot from "../assets/showcase-extension.png";
 import IconBatch from "../icons/IconBatch.astro";
 import IconClock from "../icons/IconClock.astro";
 import IconSliders from "../icons/IconSliders.astro";
 import IconPuzzle from "../icons/IconPuzzle.astro";
 
-// Each tab's screenshot is a straightforward one-file swap: drop the real
-// PNG at the path noted below, update the `src` here, done. The Queue tab
-// is already wired to the real app screenshot (src/assets/dashboard-hero.png).
 const tabs = [
   {
     key: "queue",
     label: "Queue",
     icon: IconBatch,
     caption: "Paste a batch of links and watch them download in parallel with live progress.",
+    image: queueScreenshot,
   },
   {
     key: "history",
     label: "History",
     icon: IconClock,
     caption: "Every finished download, searchable and filterable, with one-click retry and reveal.",
-    // TODO: replace with src/assets/dashboard-history.png once supplied
-    placeholder: "/showcase-history-placeholder.svg",
+    image: historyScreenshot,
   },
   {
     key: "settings",
     label: "Settings",
     icon: IconSliders,
     caption: "Tune concurrency, aria2c, duplicate handling, and your default output folder once.",
-    // TODO: replace with src/assets/dashboard-settings.png once supplied
-    placeholder: "/showcase-settings-placeholder.svg",
+    image: settingsScreenshot,
   },
   {
     key: "extension",
     label: "Extension",
     icon: IconPuzzle,
     caption: "The companion Chrome extension, ready to install straight from the app.",
-    // TODO: replace with src/assets/dashboard-extension.png once supplied
-    placeholder: "/showcase-extension-placeholder.svg",
+    image: extensionScreenshot,
   },
 ];
 ---
@@ -53,34 +51,21 @@ const tabs = [
 
     <div class="reveal mt-12" id="showcase">
       <div class="glass rounded-panel p-2 sm:p-3 shadow-2xl relative aspect-[16/9] overflow-hidden">
-        {tabs.map((tab, index) =>
-          tab.key === "queue" ? (
-            <div
-              class="showcase-panel absolute inset-0 transition-opacity duration-500"
-              data-panel={index}
-            >
-              <Image
-                src={dashboardScreenshot}
-                alt="Screenshot of the CLIP.PULL desktop app's Queue view"
-                widths={[640, 1000, 1400, 1915]}
-                sizes="(min-width: 1024px) 1000px, 90vw"
-                class="w-full h-full object-cover object-top rounded-[calc(var(--radius-lg)-6px)]"
-              />
-            </div>
-          ) : (
-            <div
-              class="showcase-panel absolute inset-0 transition-opacity duration-500"
-              data-panel={index}
-            >
-              <img
-                src={tab.placeholder}
-                alt={`Screenshot of the CLIP.PULL desktop app's ${tab.label} view`}
-                class="w-full h-full object-cover object-top rounded-[calc(var(--radius-lg)-6px)]"
-                loading="lazy"
-              />
-            </div>
-          )
-        )}
+        {tabs.map((tab, index) => (
+          <div
+            class="showcase-panel absolute inset-0 transition-opacity duration-500"
+            data-panel={index}
+          >
+            <Image
+              src={tab.image}
+              alt={`Screenshot of the CLIP.PULL desktop app's ${tab.label} view`}
+              widths={[640, 1000, 1400, 1915]}
+              sizes="(min-width: 1024px) 1000px, 90vw"
+              class="w-full h-full object-cover object-top rounded-[calc(var(--radius-lg)-6px)]"
+              loading={index === 0 ? "eager" : "lazy"}
+            />
+          </div>
+        ))}
       </div>
 
       <p id="showcase-caption" class="mt-5 text-center text-sm text-text-dim min-h-[1.5em]">

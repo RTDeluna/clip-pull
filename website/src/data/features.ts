@@ -4,12 +4,11 @@ export interface FeatureCategory {
   bullets: string[];
 }
 
-// Copy pulled only from real, shipped behavior in the app — see the two
-// hard guardrails below before adding anything here:
-//   1. Never mention pause/resume (backend-only, no shipped UI).
-//   2. Never describe an interactive "continue anyway?" dialog for
-//      duplicates — only the passive "Already downloaded" badge and the
-//      settings toggle to auto-skip actually ship today.
+// Copy pulled only from real, shipped behavior in the app — see the hard
+// guardrail below before adding anything here: never describe an
+// interactive "continue anyway?" dialog for duplicates — only the passive
+// "Already downloaded" badge and the settings toggle to auto-skip actually
+// ship today.
 export const features: FeatureCategory[] = [
   {
     icon: "IconBatch",
@@ -25,6 +24,7 @@ export const features: FeatureCategory[] = [
     title: "Built for Speed",
     bullets: [
       "Parallel downloads with live per-video progress — percent, speed, ETA, size",
+      "Pause any download mid-transfer and resume it later without starting over",
       "Configurable concurrency, plus per-video fragment concurrency for faster individual files",
       "Optional aria2c acceleration, auto-detected on your machine",
     ],
