@@ -1,7 +1,16 @@
 <#
 .SYNOPSIS
   Cuts a CLIP.PULL release: bumps the version, builds the Windows installer,
-  tags and pushes, then publishes a GitHub release with the .exe attached.
+  tags and pushes, then publishes the installer to one persistent GitHub
+  release (tag "release") under a stable, version-less filename.
+
+.DESCRIPTION
+  Every version still gets its own "v<version>" git tag for source history
+  (useful for tracing which commit a bug report's build came from), but the
+  GitHub Release page itself stays singular: the "release" tag is a fixed
+  slug, not a version pointer, and its one asset (CLIP.PULL.Setup.exe) is
+  replaced in place each time. Nothing that links to the download (the
+  website) ever needs to change to pick up a new version.
 
 .PARAMETER Bump
   Semantic Versioning bump type: "patch" (bug fixes), "minor" (new,
@@ -85,9 +94,28 @@ if ($previousTag) {
 }
 if (-not $notes) { $notes = "No notable changes recorded." }
 
-# 7. Publish the GitHub release with the installer attached.
-Write-Host "Creating GitHub release $tag..." -ForegroundColor Cyan
-gh release create $tag $exe.FullName --title "CLIP.PULL $tag" --notes $notes
-if ($LASTEXITCODE -ne 0) { Fail "gh release create failed - version was pushed but no release was published." }
+# 7. Publish to the one persistent GitHub release (tag "release") rather
+#    than creating a new release per version. "release" is a fixed slug,
+#    not a version pointer - it does not move to track $tag, since nothing
+#    downstream needs it to. The asset filename is version-less too, so the
+#    website's download link never needs to change. gh's "file#label" syntax
+#    only sets a cosmetic display label, NOT the actual stored filename (that
+#    always comes from the local file's own name) - so the rename has to
+#    happen on disk, via a real copy, before upload.
+$assetName = "CLIP.PULL.Setup.exe"
+$stableAssetPath = Join-Path $exe.Directory.FullName $assetName
+Copy-Item -Path $exe.FullName -Destination $stableAssetPath -Force
 
-Write-Host "Released $tag." -ForegroundColor Green
+Write-Host "Publishing $assetName on the 'release' GitHub release..." -ForegroundColor Cyan
+gh release view release *> $null
+if ($LASTEXITCODE -ne 0) {
+    gh release create release $stableAssetPath --title "CLIP.PULL $tag" --notes $notes
+    if ($LASTEXITCODE -ne 0) { Fail "gh release create failed - version was pushed but no release was published." }
+} else {
+    gh release upload release $stableAssetPath --clobber
+    if ($LASTEXITCODE -ne 0) { Fail "gh release upload failed - version was pushed but the asset wasn't updated." }
+    gh release edit release --title "CLIP.PULL $tag" --notes $notes
+    if ($LASTEXITCODE -ne 0) { Fail "gh release edit failed - asset uploaded but the title/notes weren't updated." }
+}
+
+Write-Host "Released $tag (published as $assetName on the 'release' GitHub release)." -ForegroundColor Green

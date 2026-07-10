@@ -36,7 +36,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 
 ## Installing
 
-**Windows** is available now — download `CLIP.PULL Setup <version>.exe` from the Releases page and run it.
+**Windows** is available now — download `CLIP.PULL.Setup.exe` from the [latest release](https://github.com/RTDeluna/clip-pull/releases/latest) and run it.
 
 > This build is currently **unsigned**. Windows SmartScreen may warn that the publisher is unrecognized — click **More info → Run anyway**.
 
@@ -146,7 +146,7 @@ Every release follows [Semantic Versioning](https://semver.org/): given `MAJOR.M
 - **minor** — new, backward-compatible functionality (e.g. `feat: ...` commits)
 - **major** — breaking changes (data format, removed functionality, etc.)
 
-`scripts/release.ps1` runs the whole checklist in one go: it bumps `package.json` and commits + tags it, builds the installer (`npm run dist`), pushes the commit and tag, and publishes a GitHub release with the built `.exe` attached and release notes generated from every commit since the last tag. It refuses to run on a dirty working tree, off `master`, or if `master` is behind `origin/master`, and rolls back the version bump if the build fails.
+`scripts/release.ps1` runs the whole checklist in one go: it bumps `package.json` and commits + tags it (`v<version>` — kept purely for source history, so a bug report tied to a specific build can be traced back to its exact commit), builds the installer (`npm run dist`), pushes the commit and tag, then publishes the `.exe` to a single persistent GitHub release (tag `release`) as a version-less `CLIP.PULL.Setup.exe` asset — replaced in place each time, so the website's download link never needs to change. It refuses to run on a dirty working tree, off `master`, or if `master` is behind `origin/master`, and rolls back the version bump if the build fails.
 
 ```powershell
 npm run release:patch   # bug fixes
