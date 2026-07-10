@@ -8,7 +8,10 @@
     "start": "electron .",
     "build:backend": "cd backend && python -m PyInstaller --onefile --name clippull-backend --distpath dist --workpath build --specpath . main.py",
     "build:extension": "powershell -ExecutionPolicy Bypass -File scripts/build-extension.ps1",
-    "dist": "npm run build:backend && npm run build:extension && electron-builder"
+    "dist": "npm run build:backend && npm run build:extension && electron-builder",
+    "release:patch": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump patch",
+    "release:minor": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump minor",
+    "release:major": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump major"
   },
   "devDependencies": {
     "electron": "^33.2.0",

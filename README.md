@@ -16,6 +16,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 - [The Extension tab (Skool Video Downloader)](#the-extension-tab-skool-video-downloader)
 - [Tips & troubleshooting](#tips--troubleshooting)
 - [Running from source / building installers](#running-from-source--building-installers)
+- [Releasing](#releasing)
 
 ---
 
@@ -136,3 +137,24 @@ npm run dist
 ```
 
 This builds the standalone backend executable with PyInstaller, packages the Chrome extension, and runs electron-builder — producing an NSIS installer on Windows or a `.zip` on macOS. Because PyInstaller doesn't cross-compile, building a real macOS artifact requires running this command on an actual Mac (with Python + PyInstaller installed there too); running it on Windows only produces the Windows installer.
+
+## Releasing
+
+Every release follows [Semantic Versioning](https://semver.org/): given `MAJOR.MINOR.PATCH`,
+
+- **patch** — bug fixes, no user-visible behavior change (e.g. `fix: ...` commits)
+- **minor** — new, backward-compatible functionality (e.g. `feat: ...` commits)
+- **major** — breaking changes (data format, removed functionality, etc.)
+
+`scripts/release.ps1` runs the whole checklist in one go: it bumps `package.json` and commits + tags it, builds the installer (`npm run dist`), pushes the commit and tag, and publishes a GitHub release with the built `.exe` attached and release notes generated from every commit since the last tag. It refuses to run on a dirty working tree, off `master`, or if `master` is behind `origin/master`, and rolls back the version bump if the build fails.
+
+```powershell
+npm run release:patch   # bug fixes
+npm run release:minor   # new features
+npm run release:major   # breaking changes
+
+# equivalent direct form:
+scripts\release.ps1 -Bump patch
+```
+
+Requires `gh` (GitHub CLI) authenticated with `repo` scope (`gh auth status` to check).
