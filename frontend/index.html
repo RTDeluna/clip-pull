@@ -3,99 +3,168 @@
 <head>
   <meta charset="UTF-8" />
   <title>Course Downloader</title>
+  <script>
+    (function () {
+      var STORAGE_KEY = "clippull-theme";
+      var theme = "dark";
+      try {
+        theme =
+          localStorage.getItem(STORAGE_KEY) ||
+          (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      } catch (e) {
+        // localStorage unavailable — fall back to dark.
+      }
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <nav class="tabs">
-    <button class="tab-btn active" data-view="view-queue" type="button">Queue</button>
-    <button class="tab-btn" data-view="view-history" type="button">History</button>
-    <button class="tab-btn" data-view="view-settings" type="button">Settings</button>
+    <div class="tabs__group">
+      <span class="tab-indicator" aria-hidden="true"></span>
+      <button class="tab-btn active" data-view="view-queue" type="button">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 4v10"></path>
+          <path d="M8 10l4 4 4-4"></path>
+          <path d="M5 18h14"></path>
+        </svg>
+        <span>Queue</span>
+      </button>
+      <button class="tab-btn" data-view="view-history" type="button">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="8"></circle>
+          <path d="M12 8v4l3 2"></path>
+        </svg>
+        <span>History</span>
+      </button>
+      <button class="tab-btn" data-view="view-settings" type="button">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+        </svg>
+        <span>Settings</span>
+      </button>
+      <button class="tab-btn" data-view="view-extension" type="button">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="7" width="14" height="12" rx="2"></rect>
+          <path d="M10 7V5a2 2 0 0 1 4 0v2"></path>
+        </svg>
+        <span>Extension</span>
+      </button>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light and dark mode">
+      <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+      </svg>
+      <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+      </svg>
+    </button>
   </nav>
 
   <div id="view-queue" class="view">
-    <div class="app">
+    <div class="app app--wide">
       <header class="app__header">
         <h1 class="app__title">CLIP<span class="app__title-accent">.PULL</span></h1>
         <p class="app__subtitle">Paste links. Pick a folder. Walk away.</p>
       </header>
 
-      <section class="panel">
-        <label class="field-label" for="urls">Video links (one per line)</label>
-        <div class="urls-editor">
-          <div id="urls-gutter" class="urls-gutter" aria-hidden="true"></div>
-          <textarea
-            id="urls"
-            class="urls-input"
-            spellcheck="false"
-            wrap="off"
-            placeholder="https://vimeo.com/123456789&#10;https://www.loom.com/share/abcd1234ef567890"
-          ></textarea>
-        </div>
-        <div id="invalid-lines" class="invalid-lines" hidden></div>
+      <div class="bento">
+        <section class="panel bento__input">
+          <label class="field-label" for="urls">Video links (one per line)</label>
+          <div class="urls-editor">
+            <div id="urls-gutter" class="urls-gutter" aria-hidden="true"></div>
+            <textarea
+              id="urls"
+              class="urls-input"
+              spellcheck="false"
+              wrap="off"
+              placeholder="https://vimeo.com/123456789&#10;https://www.loom.com/share/abcd1234ef567890"
+            ></textarea>
+          </div>
+          <div id="invalid-lines" class="invalid-lines" hidden></div>
 
-        <div class="field-row">
-          <div class="field-group field-group--grow">
-            <label class="field-label" for="output-folder">Save to</label>
-            <div class="folder-picker">
-              <input
-                id="output-folder"
-                class="folder-input"
-                type="text"
-                placeholder="Choose a folder…"
-                readonly
-              />
-              <button id="browse-btn" class="btn btn--ghost" type="button">Browse…</button>
+          <div class="field-row">
+            <div class="field-group field-group--grow">
+              <label class="field-label" for="output-folder">Save to</label>
+              <div class="folder-picker">
+                <input
+                  id="output-folder"
+                  class="folder-input"
+                  type="text"
+                  placeholder="Choose a folder…"
+                  readonly
+                />
+                <button id="browse-btn" class="btn btn--ghost" type="button">Browse…</button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="field-row">
-          <div class="field-group field-group--grow">
-            <label class="field-label" for="referer">Referer domain (optional)</label>
-            <input
-              id="referer"
-              class="text-input"
-              type="text"
-              placeholder="e.g. https://your-course-site.com"
-            />
+          <div class="field-row field-grid">
+            <div class="field-group">
+              <label class="field-label" for="referer">Referer domain (optional)</label>
+              <input
+                id="referer"
+                class="text-input"
+                type="text"
+                placeholder="e.g. https://your-course-site.com"
+              />
+            </div>
+
+            <div class="field-group">
+              <label class="field-label" for="course-folder">Course/batch folder name (optional)</label>
+              <input
+                id="course-folder"
+                class="text-input"
+                type="text"
+                placeholder="e.g. Advanced Marketing Course"
+              />
+            </div>
           </div>
-        </div>
 
-        <div class="field-row">
-          <div class="field-group field-group--grow">
-            <label class="field-label" for="course-folder">Course/batch folder name (optional)</label>
-            <input
-              id="course-folder"
-              class="text-input"
-              type="text"
-              placeholder="e.g. Advanced Marketing Course"
-            />
+          <button id="start-btn" class="btn btn--primary" type="button">Start Download</button>
+        </section>
+
+        <section class="panel bento__queue">
+          <div class="queue-header">
+            <h2 class="queue-title">Queue</h2>
+            <span id="queue-summary" class="queue-summary"></span>
           </div>
-        </div>
-
-        <button id="start-btn" class="btn btn--primary" type="button">Start Download</button>
-      </section>
-
-      <section class="panel">
-        <div class="queue-header">
-          <h2 class="queue-title">Queue</h2>
-          <span id="queue-summary" class="queue-summary"></span>
-        </div>
-        <ul id="queue-list" class="queue-list"></ul>
-      </section>
+          <ul id="queue-list" class="queue-list"></ul>
+        </section>
+      </div>
     </div>
   </div>
 
   <div id="view-history" class="view" hidden>
     <div class="app">
-      <h2 class="queue-title">History</h2>
+      <div class="queue-header">
+        <h2 class="queue-title">Download history</h2>
+        <div class="header-actions">
+          <span id="history-summary" class="queue-summary"></span>
+          <button id="history-clear-btn" class="btn btn--ghost btn--pill" type="button">Clear all</button>
+        </div>
+      </div>
       <div class="history-controls">
-        <input id="history-search" class="text-input" type="text" placeholder="Search title, URL, or file path…" />
-        <select id="history-status-filter" class="text-input">
-          <option value="">All</option>
-          <option value="done">Done</option>
-          <option value="error">Failed</option>
-        </select>
+        <div class="search-input">
+          <svg class="search-input__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <input id="history-search" type="text" placeholder="Search download history" />
+        </div>
+        <div class="select-wrapper history-status-filter">
+          <select id="history-status-filter" class="text-input">
+            <option value="">All</option>
+            <option value="done">Done</option>
+            <option value="error">Failed</option>
+          </select>
+          <svg class="select-wrapper__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6"></path>
+          </svg>
+        </div>
       </div>
       <ul id="history-list" class="queue-list"></ul>
     </div>
@@ -131,10 +200,61 @@
     </div>
   </div>
 
+  <div id="view-extension" class="view" hidden>
+    <div class="app">
+      <h2 class="queue-title">Extension</h2>
+      <div class="panel">
+        <div class="extension-hero">
+          <img src="../assets/extension-icon.png" alt="" class="extension-hero__icon" />
+          <div>
+            <h3 class="extension-hero__title">Skool Video Downloader</h3>
+            <p class="extension-hero__pitch">
+              A Chrome extension that detects the video on a Skool lesson page and sends it
+              straight into Clip.Pull's Queue tab — no copy-pasting links.
+            </p>
+          </div>
+        </div>
+
+        <div id="extension-status" class="extension-status"></div>
+
+        <button id="extension-download-btn" class="btn btn--primary" type="button">Download Extension</button>
+
+        <div class="extension-steps">
+          <span class="field-label">Install in Chrome</span>
+          <ol class="extension-steps__list">
+            <li>Unzip the downloaded file</li>
+            <li>Open <code>chrome://extensions</code></li>
+            <li>Enable <strong>Developer Mode</strong> (top right)</li>
+            <li>Click <strong>Load unpacked</strong></li>
+            <li>Select the unzipped folder</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="duplicate-confirm-overlay" class="modal-overlay" hidden>
+    <div class="modal panel" role="alertdialog" aria-modal="true" aria-labelledby="duplicate-confirm-title" aria-describedby="duplicate-confirm-message">
+      <h3 id="duplicate-confirm-title" class="queue-title">Already downloaded</h3>
+      <p id="duplicate-confirm-message" class="modal__message">
+        These links were already downloaded successfully. Queue them again anyway, or skip them?
+      </p>
+      <ul id="duplicate-confirm-list" class="modal__list"></ul>
+      <div class="modal__actions">
+        <button id="duplicate-confirm-skip" class="btn btn--ghost" type="button">Skip duplicates</button>
+        <button id="duplicate-confirm-continue" class="btn btn--primary" type="button">Queue anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="theme.js"></script>
+  <script type="module" src="ripple.js"></script>
+  <script type="module" src="toast.js"></script>
   <script type="module" src="ws-client.js"></script>
   <script type="module" src="tabs.js"></script>
   <script type="module" src="settings-view.js"></script>
   <script type="module" src="history-view.js"></script>
+  <script type="module" src="extension-view.js"></script>
   <script type="module" src="renderer.js"></script>
 </body>
 </html>
