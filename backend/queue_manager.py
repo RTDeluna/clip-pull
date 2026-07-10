@@ -16,6 +16,9 @@ class QueueEntry:
     total_size: Optional[str] = None
     error_reason: Optional[str] = None
     retry_count: int = 0
+    batch_id: Optional[str] = None
+    output_folder: Optional[str] = None
+    previously_downloaded: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -30,6 +33,9 @@ class QueueEntry:
             "total_size": self.total_size,
             "error_reason": self.error_reason,
             "retry_count": self.retry_count,
+            "batch_id": self.batch_id,
+            "output_folder": self.output_folder,
+            "previously_downloaded": self.previously_downloaded,
         }
 
 
@@ -43,10 +49,23 @@ class QueueManager:
         if self.on_update:
             self.on_update(entry.to_dict())
 
-    def add_entries(self, urls: list[str]) -> list[QueueEntry]:
+    def add_entries(
+        self,
+        urls: list[str],
+        batch_id: Optional[str] = None,
+        output_folder: Optional[str] = None,
+        previously_downloaded_urls: Optional[set[str]] = None,
+    ) -> list[QueueEntry]:
+        previously_downloaded_urls = previously_downloaded_urls or set()
         created = []
         for url in urls:
-            entry = QueueEntry(id=uuid.uuid4().hex, url=url)
+            entry = QueueEntry(
+                id=uuid.uuid4().hex,
+                url=url,
+                batch_id=batch_id,
+                output_folder=output_folder,
+                previously_downloaded=url in previously_downloaded_urls,
+            )
             self._entries[entry.id] = entry
             self._order.append(entry.id)
             created.append(entry)
@@ -58,6 +77,21 @@ class QueueManager:
 
     def get_all(self) -> list[QueueEntry]:
         return [self._entries[eid] for eid in self._order]
+
+    def is_batch_complete(self, batch_id: Optional[str]) -> bool:
+        if batch_id is None:
+            return False
+        batch_entries = [e for e in self._entries.values() if e.batch_id == batch_id]
+        if not batch_entries:
+            return False
+        return all(e.status in ("done", "error") for e in batch_entries)
+
+    def batch_summary(self, batch_id: Optional[str]) -> dict:
+        batch_entries = [e for e in self._entries.values() if e.batch_id == batch_id]
+        return {
+            "done": sum(1 for e in batch_entries if e.status == "done"),
+            "error": sum(1 for e in batch_entries if e.status == "error"),
+        }
 
     def set_status(self, entry_id: str, status: str) -> None:
         entry = self._entries[entry_id]

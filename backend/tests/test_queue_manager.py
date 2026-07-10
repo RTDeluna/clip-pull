@@ -101,3 +101,68 @@ def test_on_update_callback_fires_on_mutation():
     manager.set_status(entry.id, "downloading")
     assert len(received) == 2
     assert received[-1]["status"] == "downloading"
+
+
+def test_add_entries_stamps_batch_id_output_folder_on_all_created_entries():
+    manager = QueueManager()
+    entries = manager.add_entries(
+        ["https://vimeo.com/1", "https://vimeo.com/2"],
+        batch_id="batch-1",
+        output_folder="C:/downloads",
+    )
+    assert all(e.batch_id == "batch-1" for e in entries)
+    assert all(e.output_folder == "C:/downloads" for e in entries)
+
+
+def test_add_entries_marks_previously_downloaded_urls():
+    manager = QueueManager()
+    entries = manager.add_entries(
+        ["https://vimeo.com/1", "https://vimeo.com/2"],
+        previously_downloaded_urls={"https://vimeo.com/1"},
+    )
+    assert entries[0].previously_downloaded is True
+    assert entries[1].previously_downloaded is False
+
+
+def test_add_entries_defaults_batch_folder_and_previously_downloaded():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/1"])
+    assert entry.batch_id is None
+    assert entry.output_folder is None
+    assert entry.previously_downloaded is False
+
+
+def test_is_batch_complete_false_while_any_entry_pending():
+    manager = QueueManager()
+    entries = manager.add_entries(["https://vimeo.com/1", "https://vimeo.com/2"], batch_id="b1")
+    manager.set_status(entries[0].id, "done")
+    assert manager.is_batch_complete("b1") is False
+
+
+def test_is_batch_complete_true_when_all_terminal():
+    manager = QueueManager()
+    entries = manager.add_entries(["https://vimeo.com/1", "https://vimeo.com/2"], batch_id="b1")
+    manager.set_status(entries[0].id, "done")
+    manager.set_error(entries[1].id, "some error")
+    assert manager.is_batch_complete("b1") is True
+
+
+def test_is_batch_complete_false_for_unknown_batch_id():
+    manager = QueueManager()
+    assert manager.is_batch_complete("nonexistent") is False
+
+
+def test_is_batch_complete_false_for_none_batch_id():
+    manager = QueueManager()
+    assert manager.is_batch_complete(None) is False
+
+
+def test_batch_summary_counts_done_and_error():
+    manager = QueueManager()
+    entries = manager.add_entries(
+        ["https://vimeo.com/1", "https://vimeo.com/2", "https://vimeo.com/3"], batch_id="b1"
+    )
+    manager.set_status(entries[0].id, "done")
+    manager.set_status(entries[1].id, "done")
+    manager.set_error(entries[2].id, "failed")
+    assert manager.batch_summary("b1") == {"done": 2, "error": 1}
