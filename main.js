@@ -4,6 +4,12 @@ const fs = require("fs");
 const { spawn, exec } = require("child_process");
 const http = require("http");
 
+// Without this, Windows notifications/taskbar grouping fall back to a
+// generic "electron.app.<name>" identity instead of the app's own name —
+// must match electron-builder's "appId" so it lines up with the installed
+// shortcut's AppUserModelID.
+app.setAppUserModelId("com.clippull.downloader");
+
 const EXTENSION_DIR = path.join(__dirname, "assets", "extension");
 
 const BACKEND_PORT = 8934;
@@ -23,6 +29,7 @@ function spawnBackend() {
     backendProcess = spawn(getBackendExecutablePath(), [], {
       stdio: "inherit",
       env: { ...process.env, CLIP_PULL_DB_PATH: dbPath },
+      windowsHide: true,
     });
   } else {
     backendProcess = spawn("python", ["main.py"], {
@@ -186,7 +193,12 @@ ipcMain.handle("save-extension-package", async () => {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   spawnBackend();
-  waitForBackend(20, createWindow);
+  // The packaged backend is a PyInstaller onefile executable, which
+  // self-extracts to a temp directory on every launch — on first run,
+  // with antivirus scanning an unsigned exe, this can take much longer
+  // than a dev-mode `python main.py` start. 40 retries at 300ms gives it
+  // 12s before falling back, instead of the previous 6s.
+  waitForBackend(40, createWindow);
 });
 
 app.on("window-all-closed", () => {

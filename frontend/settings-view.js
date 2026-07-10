@@ -23,13 +23,20 @@ function applySettings(settings) {
   defaultFolderInput.value = settings.default_output_folder || "";
 }
 
-async function loadSettings() {
+// See the matching comment in renderer.js's prefillDefaultOutputFolder —
+// the packaged PyInstaller backend's cold-start can outlast main.js's
+// waitForBackend() budget, so a single attempt right at page load can lose
+// that race and leave the form blank for the whole session. Retry first.
+async function loadSettings(retriesLeft = 10) {
   try {
     const response = await fetch(`${API_BASE}/settings`);
-    if (!response.ok) return;
+    if (!response.ok) throw new Error(`settings fetch failed: ${response.status}`);
     applySettings(await response.json());
   } catch {
-    // Leave the form at whatever state it's already in.
+    if (retriesLeft > 0) {
+      setTimeout(() => loadSettings(retriesLeft - 1), 500);
+    }
+    // Retries exhausted — leave the form at whatever state it's already in.
   }
 }
 

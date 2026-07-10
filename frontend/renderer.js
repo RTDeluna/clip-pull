@@ -538,17 +538,26 @@ connectQueueSocket((event) => {
   }
 });
 
-async function prefillDefaultOutputFolder() {
+// The packaged backend is a PyInstaller onefile executable — it self-extracts
+// to a temp directory on every launch, which (especially on first run, with
+// antivirus scanning an unsigned exe) can take longer than main.js's
+// waitForBackend() budget. A single fetch attempt right as this script loads
+// can lose that race and silently never show the saved folder for the rest
+// of the session — so retry a few times before giving up for real.
+async function prefillDefaultOutputFolder(retriesLeft = 10) {
   try {
     const response = await fetch(`${API_BASE}/settings`);
-    if (!response.ok) return;
+    if (!response.ok) throw new Error(`settings fetch failed: ${response.status}`);
     const settings = await response.json();
     if (!outputFolderInput.value && settings.default_output_folder) {
       outputFolderInput.value = settings.default_output_folder;
     }
   } catch {
-    // Backend not ready yet, or unreachable — Queue view still works,
-    // just without a prefilled folder; the user can still Browse manually.
+    if (retriesLeft > 0) {
+      setTimeout(() => prefillDefaultOutputFolder(retriesLeft - 1), 500);
+    }
+    // Retries exhausted — backend genuinely unreachable; Queue view still
+    // works, just without a prefilled folder, and the user can still Browse.
   }
 }
 
