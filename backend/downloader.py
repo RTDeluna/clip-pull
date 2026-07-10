@@ -204,17 +204,23 @@ class DownloadOrchestrator:
                     self.queue_manager.set_title(entry_id, title)
                 self.queue_manager.update_progress(entry_id, 100.0, None, 0)
                 self.queue_manager.set_status(entry_id, "done")
-                self.record_history(
-                    entry_id=entry_id,
-                    batch_id=entry.batch_id,
-                    url=url,
-                    title=title,
-                    output_path=output_path,
-                    total_size=final_total_size,
-                    status="done",
-                    error_reason=None,
-                    retry_count=entry.retry_count,
-                )
+                # History recording is a side-channel (e.g. SQLite write) that
+                # must never affect the download's already-determined "done"
+                # status, so a failure here must not fall through to `except`.
+                try:
+                    self.record_history(
+                        entry_id=entry_id,
+                        batch_id=entry.batch_id,
+                        url=url,
+                        title=title,
+                        output_path=output_path,
+                        total_size=final_total_size,
+                        status="done",
+                        error_reason=None,
+                        retry_count=entry.retry_count,
+                    )
+                except Exception:
+                    pass
             except Exception as exc:
                 reason = (
                     REFERER_BLOCKED_MESSAGE
@@ -222,22 +228,34 @@ class DownloadOrchestrator:
                     else str(exc)
                 )
                 self.queue_manager.set_error(entry_id, reason)
-                self.record_history(
-                    entry_id=entry_id,
-                    batch_id=entry.batch_id,
-                    url=url,
-                    title=entry.title,
-                    output_path=None,
-                    total_size=None,
-                    status="error",
-                    error_reason=reason,
-                    retry_count=entry.retry_count,
-                )
+                # As above: history recording must not raise out of the error
+                # path and mask/replace the error status already set.
+                try:
+                    self.record_history(
+                        entry_id=entry_id,
+                        batch_id=entry.batch_id,
+                        url=url,
+                        title=entry.title,
+                        output_path=None,
+                        total_size=None,
+                        status="error",
+                        error_reason=reason,
+                        retry_count=entry.retry_count,
+                    )
+                except Exception:
+                    pass
             finally:
-                if entry.batch_id and self.on_batch_complete:
-                    if self.queue_manager.is_batch_complete(entry.batch_id):
-                        summary = self.queue_manager.batch_summary(entry.batch_id)
-                        self.on_batch_complete(entry.batch_id, summary)
+                # A raising on_batch_complete (or is_batch_complete/batch_summary)
+                # must not escape download_entry/download_all as an unhandled
+                # exception in asyncio.gather, which would leave sibling
+                # in-flight downloads in the same batch running unsupervised.
+                try:
+                    if entry.batch_id and self.on_batch_complete:
+                        if self.queue_manager.is_batch_complete(entry.batch_id):
+                            summary = self.queue_manager.batch_summary(entry.batch_id)
+                            self.on_batch_complete(entry.batch_id, summary)
+                except Exception:
+                    pass
 
     async def download_all(
         self, entry_ids: list[str], output_folder: str, referer: Optional[str] = None

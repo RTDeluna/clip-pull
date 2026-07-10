@@ -414,6 +414,24 @@ def test_download_entry_records_history_on_error():
     assert "referer" in recorded[0]["error_reason"].lower()
 
 
+def test_download_entry_status_not_corrupted_when_record_history_raises():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1"}
+
+    def raising_record_history(**kwargs):
+        raise RuntimeError("simulated history write failure")
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=fake_download, record_history=raising_record_history
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert manager.get(entry.id).status == "done"
+
+
 def test_download_all_fires_on_batch_complete_exactly_once_for_shared_batch_id():
     manager = QueueManager()
     entries = manager.add_entries(["https://vimeo.com/1", "https://vimeo.com/2"], batch_id="b1")
