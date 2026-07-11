@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import shutil
 import time
@@ -7,6 +8,8 @@ from typing import Callable, Optional
 
 from background_tasks import track_task
 from queue_manager import QueueManager
+
+logger = logging.getLogger("clippull")
 
 MAX_CONCURRENT_DOWNLOADS = 3
 REFERER_BLOCKED_MESSAGE = "Blocked — this video may require the course site as referer"
@@ -525,6 +528,7 @@ class DownloadOrchestrator:
                         if downloads:
                             output_path = downloads[-1].get("filepath")
                 except Exception:
+                    logger.exception("Failed to read output_path from yt-dlp's result for %s", url)
                     output_path = None
 
                 if title:
@@ -548,11 +552,15 @@ class DownloadOrchestrator:
                         retry_count=entry.retry_count,
                     )
                 except Exception:
-                    pass
+                    logger.exception("Failed to record history (done) for %s", url)
             except (DownloadPaused, asyncio.CancelledError):
                 self.queue_manager.mark_paused(entry_id)
             except Exception as exc:
                 reason = humanize_error_reason(exc)
+                # The UI only ever shows the humanized/friendly message, not
+                # the original technical detail -- log the raw exception
+                # (with traceback) so it's still recoverable for debugging.
+                logger.exception("Download failed for %s", url)
                 self.queue_manager.set_error(entry_id, reason)
                 # As above: history recording must not raise out of the error
                 # path and mask/replace the error status already set.
@@ -569,7 +577,7 @@ class DownloadOrchestrator:
                         retry_count=entry.retry_count,
                     )
                 except Exception:
-                    pass
+                    logger.exception("Failed to record history (error) for %s", url)
             finally:
                 self._active_tasks.pop(entry_id, None)
                 self._pause_requested.discard(entry_id)
@@ -583,7 +591,7 @@ class DownloadOrchestrator:
                             summary = self.queue_manager.batch_summary(entry.batch_id)
                             self.on_batch_complete(entry.batch_id, summary)
                 except Exception:
-                    pass
+                    logger.exception("on_batch_complete failed for batch %s", entry.batch_id)
                 # A finished entry (done or error) is already recorded in
                 # history, so it's cleared out of the live queue shortly
                 # after — the user briefly sees the final state, then it's

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -19,6 +20,22 @@ from ws_manager import ConnectionManager, QueueBroadcaster
 DB_PATH = os.environ.get(
     "CLIP_PULL_DB_PATH", str(Path(__file__).parent / "data" / "clip_pull.db")
 )
+
+# The packaged app has no visible console (stdio is hidden), so a plain
+# print()/stderr warning is invisible to end users and to us -- everything
+# meaningful goes to a log file next to the database instead. Skipped for
+# ":memory:" (test) DB paths so the test suite doesn't scatter log files.
+logger = logging.getLogger("clippull")
+logger.setLevel(logging.INFO)
+if DB_PATH != ":memory:":
+    log_dir = Path(DB_PATH).parent
+    log_dir.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(log_dir / "clippull.log", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(file_handler)
+stream_handler = logging.StreamHandler(sys.stderr)
+stream_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+logger.addHandler(stream_handler)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -96,11 +113,9 @@ if __name__ == "__main__":
     import uvicorn
 
     if not check_ffmpeg_available():
-        print(
-            "WARNING: ffmpeg not found on PATH. High-quality downloads "
-            "require ffmpeg to merge video+audio streams; downloads may fail "
-            "or fall back to lower quality without it.",
-            file=sys.stderr,
+        logger.warning(
+            "ffmpeg not found on PATH. Downloads will use a single "
+            "pre-muxed format instead of the highest available quality."
         )
 
     uvicorn.run(app, host="127.0.0.1", port=8934)
