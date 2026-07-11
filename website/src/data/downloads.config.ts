@@ -15,13 +15,13 @@ export interface PlatformDownload {
 export const downloads: Record<"windows" | "macos", PlatformDownload> = {
   windows: {
     state: "available",
-    version: "1.0.3",
+    version: "1.1.0",
     // Version-less on purpose — the release script always replaces this
     // exact asset in place on the one persistent "release" GitHub release,
     // so this URL never needs to change again. Bump `version`/`appVersion`
     // below when you want the displayed version text to stay accurate.
     url: "https://github.com/RTDeluna/clip-pull/releases/latest/download/CLIP.PULL.Setup.exe",
-    fileSizeMb: 103,
+    fileSizeMb: 136,
     minOsVersion: "Windows 10 64-bit or later",
   },
   macos: {
@@ -30,4 +30,4 @@ export const downloads: Record<"windows" | "macos", PlatformDownload> = {
   },
 };
 
-export const appVersion = "1.0.3";
+export const appVersion = "1.1.0";
