@@ -21,6 +21,12 @@ class QueueEntry:
     batch_id: Optional[str] = None
     output_folder: Optional[str] = None
     previously_downloaded: bool = False
+    # Which History row (if any) this entry's completion should update in
+    # place instead of inserting a new one -- set either up front (a retry
+    # re-queued from the History tab) or after this entry's own first
+    # completion (a retry still in the live Queue, reusing the same entry
+    # id). Internal bookkeeping only, deliberately excluded from to_dict().
+    history_id: Optional[int] = None
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +70,7 @@ class QueueManager:
         batch_id: Optional[str] = None,
         output_folder: Optional[str] = None,
         previously_downloaded_urls: Optional[set[str]] = None,
+        history_id: Optional[int] = None,
     ) -> list[QueueEntry]:
         previously_downloaded_urls = previously_downloaded_urls or set()
         # Skip URLs that already have an active (not yet done/error) entry —
@@ -81,6 +88,7 @@ class QueueManager:
                 batch_id=batch_id,
                 output_folder=output_folder,
                 previously_downloaded=url in previously_downloaded_urls,
+                history_id=history_id,
             )
             self._entries[entry.id] = entry
             self._order.append(entry.id)
@@ -151,6 +159,20 @@ class QueueManager:
         entry.stage = None
         self._notify(entry)
 
+    def mark_pausing(self, entry_id: str) -> None:
+        """Sets status to "pausing" immediately when a pause is requested,
+        broadcast right away — the actual stop only happens whenever the
+        worker thread's next progress callback notices the pause flag (see
+        DownloadOrchestrator.request_pause), which can lag visibly behind
+        the click otherwise. This transitional status keeps the UI feeling
+        immediate without pretending the download has already stopped."""
+        entry = self._entries[entry_id]
+        entry.status = "pausing"
+        entry.speed = None
+        entry.speed_bytes = None
+        entry.eta = None
+        self._notify(entry)
+
     def mark_paused(self, entry_id: str) -> None:
         """Sets status to "paused" without touching percent/downloaded/total
         size — unlike reset_for_retry, a paused download should resume from
@@ -162,6 +184,26 @@ class QueueManager:
         entry.eta = None
         entry.stage = None
         self._notify(entry)
+
+    def mark_resuming(self, entry_id: str) -> None:
+        """Sets status to "resuming" the instant Resume is clicked, broadcast
+        immediately — the entry then flips to "downloading" for real once
+        its download task actually starts (see download_entry). Deliberately
+        distinct from plain "queued": that status means "reset to 0%" on the
+        frontend (for an actual fresh retry), which a resume must not do —
+        percent/downloaded/total size are left untouched here."""
+        entry = self._entries[entry_id]
+        entry.status = "resuming"
+        self._notify(entry)
+
+    def set_history_id(self, entry_id: str, history_id: int) -> None:
+        """Remembers which History row this entry's completion wrote, so a
+        later retry of the same still-in-queue entry updates that row in
+        place instead of inserting a duplicate. Not user-visible state, so
+        this doesn't notify."""
+        entry = self._entries.get(entry_id)
+        if entry is not None:
+            entry.history_id = history_id
 
     def reset_for_retry(self, entry_id: str) -> None:
         entry = self._entries[entry_id]

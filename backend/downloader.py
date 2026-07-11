@@ -122,6 +122,29 @@ def is_referer_blocked_error(exc: Exception) -> bool:
     return "403" in str(exc)
 
 
+class _YtDlpLogger:
+    """yt-dlp's own report_error/report_warning write straight to stderr via
+    to_stderr — completely ignoring the quiet/no_warnings opts — before the
+    matching exception is raised and caught below, so without this, every
+    failed download prints raw, ANSI-coded, un-humanized text straight to
+    the console in addition to (and before) showing up as a proper UI error.
+    Passing this as the `logger` opt is yt-dlp's supported way to redirect
+    that output; downgrading it to DEBUG keeps it out of the console by
+    default while still leaving a trace if debug logging is ever enabled."""
+
+    def debug(self, msg: str) -> None:
+        logger.debug(msg)
+
+    def warning(self, msg: str) -> None:
+        logger.debug(msg)
+
+    def error(self, msg: str) -> None:
+        logger.debug(msg)
+
+
+_YTDLP_LOGGER = _YtDlpLogger()
+
+
 FRIENDLY_ERROR_RULES: list[tuple["re.Pattern[str]", str]] = [
     (
         re.compile(r"WinError 32|being used by another process", re.IGNORECASE),
@@ -165,6 +188,14 @@ FRIENDLY_ERROR_RULES: list[tuple["re.Pattern[str]", str]] = [
     (
         re.compile(r"HTTP Error 404|404: Not Found", re.IGNORECASE),
         "This video couldn't be found — the link may be private, deleted, or mistyped.",
+    ),
+    (
+        re.compile(
+            r"HTTP Error 5\d\d|Service Unavailable|Internal Server Error|"
+            r"Bad Gateway|Gateway Timeout",
+            re.IGNORECASE,
+        ),
+        "The video host's server had a temporary problem. Wait a moment and hit Retry.",
     ),
     (
         re.compile(
@@ -216,6 +247,7 @@ def build_ydl_opts(
         "postprocessor_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
+        "logger": _YTDLP_LOGGER,
         # yt-dlp used as a library (not via its own CLI) gets none of the
         # CLI's default retry counts -- leaving these unset means 0 retries,
         # so a single transient blip anywhere in a long download aborts the
@@ -287,6 +319,7 @@ def probe_total_bytes(url: str, referer: Optional[str]) -> Optional[int]:
         "format": select_format(),
         "quiet": True,
         "no_warnings": True,
+        "logger": _YTDLP_LOGGER,
         "retries": 10,
         "socket_timeout": 30,
     }
@@ -571,7 +604,7 @@ class DownloadOrchestrator:
                 # must never affect the download's already-determined "done"
                 # status, so a failure here must not fall through to `except`.
                 try:
-                    self.record_history(
+                    history_row = self.record_history(
                         entry_id=entry_id,
                         batch_id=entry.batch_id,
                         url=url,
@@ -581,7 +614,10 @@ class DownloadOrchestrator:
                         status="done",
                         error_reason=None,
                         retry_count=entry.retry_count,
+                        update_id=entry.history_id,
                     )
+                    if history_row:
+                        self.queue_manager.set_history_id(entry_id, history_row["id"])
                 except Exception:
                     logger.exception("Failed to record history (done) for %s", url)
             except (DownloadPaused, asyncio.CancelledError):
@@ -596,7 +632,7 @@ class DownloadOrchestrator:
                 # As above: history recording must not raise out of the error
                 # path and mask/replace the error status already set.
                 try:
-                    self.record_history(
+                    history_row = self.record_history(
                         entry_id=entry_id,
                         batch_id=entry.batch_id,
                         url=url,
@@ -606,7 +642,10 @@ class DownloadOrchestrator:
                         status="error",
                         error_reason=reason,
                         retry_count=entry.retry_count,
+                        update_id=entry.history_id,
                     )
+                    if history_row:
+                        self.queue_manager.set_history_id(entry_id, history_row["id"])
                 except Exception:
                     logger.exception("Failed to record history (error) for %s", url)
             finally:

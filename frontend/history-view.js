@@ -116,7 +116,11 @@ async function retryFromHistory(entry, button) {
     const response = await fetch(`${API_BASE}/queue`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ urls_text: entry.url, output_folder: outputFolder }),
+      body: JSON.stringify({
+        urls_text: entry.url,
+        output_folder: outputFolder,
+        retry_of_history_id: entry.id,
+      }),
     });
     if (!response.ok) {
       showToast("Failed to queue this retry.", "error");

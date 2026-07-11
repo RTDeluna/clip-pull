@@ -26,6 +26,10 @@ class QueueRequest(BaseModel):
     referer: Optional[str] = None
     subfolder: Optional[str] = None
     duplicate_action: Optional[Literal["queue_all", "skip_duplicates"]] = None
+    # Set when this submission is a History tab retry of a single failed
+    # entry -- lets the new download's completion update that same History
+    # row in place instead of adding a second, duplicate entry for it.
+    retry_of_history_id: Optional[int] = None
 
 
 class RetryRequest(BaseModel):
@@ -105,6 +109,7 @@ def build_queue_router(
             batch_id=batch_id,
             output_folder=resolved_folder,
             previously_downloaded_urls=previously_downloaded_urls,
+            history_id=request.retry_of_history_id,
         )
         created_urls = {entry.url for entry in entries}
         skipped_inflight_urls = [u for u in valid_urls if u not in created_urls]
@@ -150,8 +155,15 @@ def build_queue_router(
 
     @router.post("/queue/{entry_id}/pause", status_code=202)
     def pause_entry(entry_id: str) -> dict:
-        orchestrator.request_pause(entry_id)
+        # Actually stopping the download can lag a moment behind this call
+        # (see DownloadOrchestrator.request_pause's docstring) -- marking
+        # "pausing" here broadcasts an immediate status change over the
+        # WebSocket instead of leaving the UI looking unresponsive until
+        # the worker thread's next progress tick catches up.
+        paused = orchestrator.request_pause(entry_id)
         try:
+            if paused:
+                queue_manager.mark_pausing(entry_id)
             return {"entry": queue_manager.to_dict(entry_id)}
         except KeyError:
             raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
@@ -160,6 +172,12 @@ def build_queue_router(
     async def resume_entry(entry_id: str, request: RetryRequest) -> dict:
         try:
             entry = queue_manager.get(entry_id)
+            # Broadcast the "resuming" transition immediately rather than
+            # waiting for the scheduled download task to actually start
+            # (download_entry only sets "downloading" once it acquires a
+            # concurrency slot) -- otherwise the row visibly sits on
+            # "Paused" for a beat after Resume is clicked.
+            queue_manager.mark_resuming(entry_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
         referer = request.referer or state.referer

@@ -24,7 +24,9 @@ function statusLabel(entry) {
   if (entry.status === "error") return "Failed";
   if (entry.status === "done") return "Done";
   if (entry.status === "downloading") return "Downloading";
+  if (entry.status === "pausing") return "Pausing…";
   if (entry.status === "paused") return "Paused";
+  if (entry.status === "resuming") return "Resuming…";
   return "Queued";
 }
 
@@ -214,7 +216,9 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   statusEl.className = "queue-row__status";
   if (entry.status === "done") statusEl.classList.add("queue-row__status--done");
   if (entry.status === "error") statusEl.classList.add("queue-row__status--error");
-  if (entry.status === "paused") statusEl.classList.add("queue-row__status--paused");
+  if (entry.status === "paused" || entry.status === "pausing") {
+    statusEl.classList.add("queue-row__status--paused");
+  }
 
   const stageEl = row.querySelector(".queue-row__stage");
   const stage = stageLabel(entry);

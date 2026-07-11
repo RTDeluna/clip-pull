@@ -108,6 +108,27 @@ def test_pause_entry_flags_the_active_download_for_cancellation():
     assert entry_id in orchestrator._pause_requested
 
 
+def test_pause_entry_immediately_broadcasts_a_pausing_status():
+    client, queue_manager, orchestrator, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/555b", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.set_status(entry_id, "downloading")
+
+    class FakeTask:
+        def done(self):
+            return False
+
+    orchestrator._active_tasks[entry_id] = FakeTask()
+
+    response = client.post(f"/queue/{entry_id}/pause")
+    assert response.status_code == 202
+    # "pausing", not yet "paused" -- the actual stop only happens once the
+    # worker thread's next progress tick notices the pause flag.
+    assert response.json()["entry"]["status"] == "pausing"
+
+
 def test_pause_entry_is_a_no_op_when_nothing_is_actively_downloading():
     client, _, _, _, _ = _make_client()
     post_response = client.post(
@@ -159,6 +180,37 @@ def test_resume_entry_does_not_reset_progress_fields():
     assert entry["percent"] == 42.0
     assert entry["downloaded_size"] == "42MB"
     assert entry["total_size"] == "100MB"
+
+
+def test_resume_entry_immediately_broadcasts_a_resuming_status_not_queued():
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/559", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.update_progress(entry_id, 42.0, "1MiB/s", 30, "42MB", "100MB")
+    queue_manager.mark_paused(entry_id)
+
+    response = client.post(f"/queue/{entry_id}/resume", json={})
+    assert response.status_code == 202
+    # Deliberately not "queued" -- that status means "reset progress to 0%"
+    # on the frontend (see queue_manager.mark_resuming's docstring), which a
+    # resume of an already-partial download must not trigger.
+    assert response.json()["entry"]["status"] == "resuming"
+
+
+def test_post_queue_stamps_retry_of_history_id_onto_the_created_entry():
+    client, queue_manager, _, _, _ = _make_client()
+    response = client.post(
+        "/queue",
+        json={
+            "urls_text": "https://vimeo.com/560",
+            "output_folder": "C:/downloads",
+            "retry_of_history_id": 42,
+        },
+    )
+    entry_id = response.json()["entries"][0]["id"]
+    assert queue_manager.get(entry_id).history_id == 42
 
 
 def test_post_queue_requires_confirmation_when_duplicate_present_and_setting_disabled():

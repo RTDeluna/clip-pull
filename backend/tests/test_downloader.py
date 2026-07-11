@@ -5,6 +5,7 @@ from collections import namedtuple
 from pathlib import Path
 from unittest.mock import patch
 
+from history_store import HistoryStore
 from queue_manager import QueueManager
 from downloader import (
     CONCURRENT_FRAGMENT_DOWNLOADS,
@@ -53,6 +54,31 @@ def test_build_ydl_opts_registers_progress_hook_as_postprocessor_hook_too():
     assert opts["postprocessor_hooks"] == [hook]
 
 
+def test_build_ydl_opts_sets_custom_logger_to_prevent_console_leak():
+    # yt-dlp's report_error/report_warning write straight to stderr
+    # regardless of quiet/no_warnings, before the matching exception is
+    # even raised — without a custom logger opt, every failed download
+    # would print raw yt-dlp text to the console in addition to (and
+    # before) showing up as a proper, humanized UI error.
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    custom_logger = opts["logger"]
+    assert hasattr(custom_logger, "debug")
+    assert hasattr(custom_logger, "warning")
+    assert hasattr(custom_logger, "error")
+
+
+def test_ytdlp_logger_does_not_write_to_stderr(capsys):
+    from downloader import _YTDLP_LOGGER
+
+    _YTDLP_LOGGER.error("ERROR: [vimeo] 916110608: HTTP Error 503: Service Unavailable")
+    _YTDLP_LOGGER.warning("some warning")
+    _YTDLP_LOGGER.debug("some debug message")
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
 def test_is_referer_blocked_error_detects_403():
     assert is_referer_blocked_error(Exception("HTTP Error 403: Forbidden")) is True
 
@@ -90,6 +116,17 @@ def test_humanize_error_reason_rewrites_404_errors():
     reason = humanize_error_reason(exc)
     assert "404" not in reason
     assert "couldn't be found" in reason
+
+
+def test_humanize_error_reason_rewrites_503_errors():
+    exc = Exception(
+        "ERROR: [vimeo] 916110608: Unable to download webpage: HTTP Error 503: "
+        "Service Unavailable (caused by <HTTPError 503: Service Unavailable>)"
+    )
+    reason = humanize_error_reason(exc)
+    assert "503" not in reason
+    assert "HTTPError" not in reason
+    assert "temporary problem" in reason
 
 
 def test_humanize_error_reason_rewrites_network_errors():
@@ -739,6 +776,31 @@ def test_probe_total_bytes_sets_retry_and_timeout_config():
     assert captured_opts["socket_timeout"] == 30
 
 
+def test_probe_total_bytes_sets_custom_logger_to_prevent_console_leak():
+    captured_opts = {}
+
+    class FakeYdl:
+        def __init__(self, opts):
+            captured_opts.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"filesize": 10}
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        probe_total_bytes("https://vimeo.com/111", None)
+
+    custom_logger = captured_opts["logger"]
+    assert hasattr(custom_logger, "debug")
+    assert hasattr(custom_logger, "warning")
+    assert hasattr(custom_logger, "error")
+
+
 def test_progress_hook_computes_weighted_percent_across_two_streams_when_probe_available():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -1154,6 +1216,69 @@ def test_download_entry_records_history_on_error():
     assert len(recorded) == 1
     assert recorded[0]["status"] == "error"
     assert "referer" in recorded[0]["error_reason"].lower()
+
+
+def test_download_entry_updates_same_history_row_when_retried_with_same_entry_id():
+    # Simulates the Queue tab's own Retry button: reset_for_retry reuses the
+    # same entry_id, still within the ~4s window before auto-removal. The
+    # first failure and the retry's success must end up as ONE History row,
+    # not two.
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    history_store = HistoryStore()
+
+    def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        raise Exception("HTTP Error 403: Forbidden")
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=failing_download, record_history=history_store.record
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+    assert len(history_store.search()) == 1
+    assert history_store.search()[0]["status"] == "error"
+
+    manager.reset_for_retry(entry.id)
+
+    def succeeding_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1", "requested_downloads": [{"filepath": "C:/out/Lesson 1.mp4"}]}
+
+    orchestrator.download_fn = succeeding_download
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    all_rows = history_store.search()
+    assert len(all_rows) == 1
+    assert all_rows[0]["status"] == "done"
+
+
+def test_download_entry_updates_history_row_named_by_entry_history_id():
+    # Simulates the History tab's own Retry button: a brand new entry_id is
+    # created (see queue_routes.post_queue's retry_of_history_id), but
+    # QueueManager.add_entries stamped it with the original failed row's id
+    # up front -- even this new entry's first completion should update that
+    # row rather than inserting a second one.
+    history_store = HistoryStore()
+    original = history_store.record(
+        entry_id="old-entry", batch_id=None, url="https://vimeo.com/111", title=None,
+        output_path=None, total_size=None, status="error", error_reason="Blocked",
+        retry_count=0,
+    )
+
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"], history_id=original["id"])
+
+    def succeeding_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1", "requested_downloads": [{"filepath": "C:/out/Lesson 1.mp4"}]}
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=succeeding_download, record_history=history_store.record
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    all_rows = history_store.search()
+    assert len(all_rows) == 1
+    assert all_rows[0]["id"] == original["id"]
+    assert all_rows[0]["status"] == "done"
+    assert all_rows[0]["entry_id"] == entry.id
 
 
 def test_download_entry_status_not_corrupted_when_record_history_raises():

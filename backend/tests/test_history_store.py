@@ -113,6 +113,40 @@ def test_clear_respects_status_filter():
     assert remaining[0]["status"] == "done"
 
 
+def test_record_with_update_id_updates_existing_row_in_place():
+    store = HistoryStore()
+    first = _record(store, status="error", error_reason="Blocked", output_path=None)
+    second = _record(
+        store,
+        status="done",
+        error_reason=None,
+        output_path="C:/downloads/Test Video [1].mp4",
+        retry_count=1,
+        update_id=first["id"],
+    )
+    assert second["id"] == first["id"]
+    all_entries = store.search()
+    assert len(all_entries) == 1
+    assert all_entries[0]["status"] == "done"
+    assert all_entries[0]["retry_count"] == 1
+
+
+def test_record_with_update_id_falls_back_to_insert_when_row_is_gone():
+    store = HistoryStore()
+    first = _record(store, status="error")
+    store.delete(first["id"])
+    second = _record(store, status="done", update_id=first["id"])
+    assert second["id"] != first["id"]
+    assert store.search() == [second]
+
+
+def test_record_without_update_id_always_inserts_a_new_row():
+    store = HistoryStore()
+    _record(store, status="error")
+    _record(store, status="done")
+    assert len(store.search()) == 2
+
+
 def test_history_persists_across_store_instances_pointing_at_same_file(tmp_path):
     db_path = tmp_path / "history.db"
     store1 = HistoryStore(db_path)

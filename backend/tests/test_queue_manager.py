@@ -122,6 +122,59 @@ def test_mark_paused_sets_status_and_clears_speed_eta_but_keeps_progress():
     assert updated.stage is None
 
 
+def test_mark_pausing_sets_status_and_clears_speed_eta_but_keeps_progress():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.0, "1MiB/s", 30, "42MB", "100MB", 1048576.0)
+    manager.set_stage(entry.id, "audio")
+    manager.mark_pausing(entry.id)
+    updated = manager.get(entry.id)
+    assert updated.status == "pausing"
+    assert updated.speed is None
+    assert updated.speed_bytes is None
+    assert updated.eta is None
+    assert updated.percent == 42.0
+    assert updated.downloaded_size == "42MB"
+    assert updated.total_size == "100MB"
+    # Unlike mark_paused, the download hasn't actually stopped yet -- the
+    # stage label should keep showing until it really does.
+    assert updated.stage == "audio"
+
+
+def test_mark_resuming_sets_status_without_touching_progress():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    manager.update_progress(entry.id, 42.0, "1MiB/s", 30, "42MB", "100MB", 1048576.0)
+    manager.mark_paused(entry.id)
+    manager.mark_resuming(entry.id)
+    updated = manager.get(entry.id)
+    assert updated.status == "resuming"
+    assert updated.percent == 42.0
+    assert updated.downloaded_size == "42MB"
+    assert updated.total_size == "100MB"
+
+
+def test_set_history_id_stores_id_without_notifying():
+    received = []
+    manager = QueueManager(on_update=lambda entry_dict: received.append(entry_dict))
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    count_before = len(received)
+    manager.set_history_id(entry.id, 42)
+    assert manager.get(entry.id).history_id == 42
+    assert len(received) == count_before
+
+
+def test_set_history_id_is_a_no_op_for_unknown_entry():
+    manager = QueueManager()
+    manager.set_history_id("does-not-exist", 42)  # must not raise
+
+
+def test_add_entries_stamps_history_id_when_provided():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"], history_id=7)
+    assert entry.history_id == 7
+
+
 def test_reset_for_retry_clears_progress_and_increments_retry_count():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])

@@ -29,8 +29,37 @@ class HistoryStore:
         status: str,
         error_reason: Optional[str],
         retry_count: int,
+        update_id: Optional[int] = None,
     ) -> dict:
+        """Writes a finished download's outcome. When update_id names an
+        existing row (a retry of that same History entry, either re-queued
+        from the History tab or re-tried while still in the live Queue),
+        that row is updated in place instead of inserting a new one -- so a
+        failed-then-retried-successfully download ends up as one History
+        entry reflecting the latest outcome, not two. Falls back to a plain
+        insert if update_id's row is gone (e.g. cleared mid-retry)."""
         with self._lock:
+            if update_id is not None:
+                cursor = self._conn.execute(
+                    """
+                    UPDATE history
+                    SET entry_id = ?, batch_id = ?, url = ?, title = ?, output_path = ?,
+                        total_size = ?, status = ?, error_reason = ?, retry_count = ?,
+                        finished_at = datetime('now')
+                    WHERE id = ?
+                    """,
+                    (
+                        entry_id, batch_id, url, title, output_path, total_size,
+                        status, error_reason, retry_count, update_id,
+                    ),
+                )
+                self._conn.commit()
+                if cursor.rowcount > 0:
+                    row = self._conn.execute(
+                        "SELECT * FROM history WHERE id = ?", (update_id,)
+                    ).fetchone()
+                    return dict(row)
+
             cursor = self._conn.execute(
                 """
                 INSERT INTO history
