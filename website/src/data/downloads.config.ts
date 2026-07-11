@@ -15,7 +15,7 @@ export interface PlatformDownload {
 export const downloads: Record<"windows" | "macos", PlatformDownload> = {
   windows: {
     state: "available",
-    version: "1.1.0",
+    version: "1.1.1",
     // Version-less on purpose — the release script always replaces this
     // exact asset in place on the one persistent "release" GitHub release,
     // so this URL never needs to change again. Bump `version`/`appVersion`
@@ -30,4 +30,4 @@ export const downloads: Record<"windows" | "macos", PlatformDownload> = {
   },
 };
 
-export const appVersion = "1.1.0";
+export const appVersion = "1.1.1";
