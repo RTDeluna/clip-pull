@@ -16,15 +16,6 @@ function notify(id, title, message) {
   });
 }
 
-async function checkClipPullHealth() {
-  try {
-    const res = await fetch(`${CLIPPULL_BASE}/health`, { signal: AbortSignal.timeout(2000) });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 async function getDefaultOutputFolder() {
   const res = await fetch(`${CLIPPULL_BASE}/settings`, { signal: AbortSignal.timeout(3000) });
   if (!res.ok) return null;
@@ -33,11 +24,12 @@ async function getDefaultOutputFolder() {
 }
 
 async function sendToClipPull({ url, referer, subfolder }) {
-  const running = await checkClipPullHealth();
-  if (!running) {
-    return { ok: false, error: "not_running" };
-  }
-
+  // A single fetch to /settings doubles as both the "is Clip.Pull even
+  // running" check and the default-folder lookup -- a separate /health
+  // call first (removed) was pure sequential overhead: a network failure
+  // here is exactly the same "not running" signal a failed health check
+  // would have given, so it only added up to 2s of extra worst-case wait
+  // before this request even started.
   let outputFolder;
   try {
     outputFolder = await getDefaultOutputFolder();

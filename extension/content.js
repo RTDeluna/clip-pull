@@ -1,28 +1,51 @@
+// A `iframe[src*="vimeo.com"]`-style CSS selector only finds candidate
+// elements — it doesn't verify the match is actually on the hostname (a
+// substring match like that is also satisfied by, say,
+// "https://evil.example/?redirect=vimeo.com/video/1", which is not a Vimeo
+// URL at all). Detectors that return an iframe's raw src verbatim (instead
+// of reconstructing a known-safe URL from just an extracted ID) check the
+// actual parsed hostname here before trusting it.
+function hasTrustedHost(urlString, allowedDomains) {
+  try {
+    const { hostname } = new URL(urlString, location.href);
+    return allowedDomains.some(
+      (domain) => hostname === domain || hostname.endsWith("." + domain)
+    );
+  } catch {
+    return false;
+  }
+}
+
 // =====================================================
 // 1️⃣ Original Loom code — unchanged
 // =====================================================
 // Replace the findLoomLink() function:
 function findLoomLink() {
-  // Also catch lazy-loaded iframes that use data-src instead of src
-  const iframe = document.querySelector(
-    'iframe[src*="loom.com/embed/"], iframe[data-src*="loom.com/embed/"]'
-  );
-  if (!iframe) return null;
+  try {
+    // Also catch lazy-loaded iframes that use data-src instead of src
+    const iframe = document.querySelector(
+      'iframe[src*="loom.com/embed/"], iframe[data-src*="loom.com/embed/"]'
+    );
+    if (!iframe) return null;
 
-  // Try multiple patterns for Loom URLs
-  const src = iframe.src || iframe.getAttribute('data-src') || '';
-  const patterns = [
-    /embed\/([a-zA-Z0-9]+)/i,
-    /share\/([a-zA-Z0-9]+)/i,
-    /v\/([a-zA-Z0-9]+)/i
-  ];
-  
-  for (const pattern of patterns) {
-    const match = src.match(pattern);
-    if (match) return `https://www.loom.com/share/${match[1]}`;
+    // Try multiple patterns for Loom URLs
+    const src = iframe.src || iframe.getAttribute('data-src') || '';
+    const patterns = [
+      /embed\/([a-zA-Z0-9]+)/i,
+      /share\/([a-zA-Z0-9]+)/i,
+      /v\/([a-zA-Z0-9]+)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = src.match(pattern);
+      if (match) return `https://www.loom.com/share/${match[1]}`;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error extracting Loom link:", error);
+    return null;
   }
-  
-  return null;
 }
 
 // =====================================================
@@ -30,39 +53,49 @@ function findLoomLink() {
 // =====================================================
 // This grabs the Loom video thumbnail from the Open Graph metadata
 function findLoomThumbnail() {
-  const metaThumb = document.querySelector('meta[property="og:image"]');
-  if (metaThumb && metaThumb.content.includes("loom.com")) {
-    return metaThumb.content; // ✅ Typically a CDN thumbnail URL
+  try {
+    const metaThumb = document.querySelector('meta[property="og:image"]');
+    if (metaThumb && metaThumb.content.includes("loom.com")) {
+      return metaThumb.content; // ✅ Typically a CDN thumbnail URL
+    }
+    return null; // fallback
+  } catch (error) {
+    console.error("Error extracting Loom thumbnail:", error);
+    return null;
   }
-  return null; // fallback
 }
 
 // =====================================================
 // 2️⃣ Add YouTube fallback — as simple as possible
 // =====================================================
 function findYouTubeLink() {
-  // Method 1: og:image meta tag
-  const tag = document.querySelector('meta[property="og:image"][content*="i.ytimg.com/vi/"]');
-  if (tag) {
-    const match = tag.content.match(/\/vi\/([a-zA-Z0-9_-]{6,})\//);
-    if (match) return `https://www.youtube.com/watch?v=${match[1]}`;
-  }
-
-  // Method 2: YouTube iframe fallback (when og:image is absent or stale after SPA nav)
-  const ytIframe = document.querySelector(
-    'iframe[src*="youtube.com/embed/"], iframe[src*="youtube-nocookie.com/embed/"], ' +
-    'iframe[data-src*="youtube.com/embed/"]'
-  );
-  if (ytIframe) {
-    const src = ytIframe.src || ytIframe.getAttribute('data-src') || '';
-    const match = src.match(/embed\/([a-zA-Z0-9_-]{6,})/);
-    if (match) {
-      console.log("✅ Found YouTube iframe:", match[1]);
-      return `https://www.youtube.com/watch?v=${match[1]}`;
+  try {
+    // Method 1: og:image meta tag
+    const tag = document.querySelector('meta[property="og:image"][content*="i.ytimg.com/vi/"]');
+    if (tag) {
+      const match = tag.content.match(/\/vi\/([a-zA-Z0-9_-]{6,})\//);
+      if (match) return `https://www.youtube.com/watch?v=${match[1]}`;
     }
-  }
 
-  return null;
+    // Method 2: YouTube iframe fallback (when og:image is absent or stale after SPA nav)
+    const ytIframe = document.querySelector(
+      'iframe[src*="youtube.com/embed/"], iframe[src*="youtube-nocookie.com/embed/"], ' +
+      'iframe[data-src*="youtube.com/embed/"]'
+    );
+    if (ytIframe) {
+      const src = ytIframe.src || ytIframe.getAttribute('data-src') || '';
+      const match = src.match(/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (match) {
+        console.log("✅ Found YouTube iframe:", match[1]);
+        return `https://www.youtube.com/watch?v=${match[1]}`;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error extracting YouTube link:", error);
+    return null;
+  }
 }
 
 // =====================================================
@@ -70,10 +103,15 @@ function findYouTubeLink() {
 // =====================================================
 // This uses the YouTube video ID to generate a standard thumbnail URL
 function findYouTubeThumbnail(ytLink) {
-  const match = ytLink.match(/v=([a-zA-Z0-9_-]{6,})/);
-  if (!match) return null;
-  const videoId = match[1];
-  return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`; // ✅ HD thumbnail
+  try {
+    const match = ytLink.match(/v=([a-zA-Z0-9_-]{6,})/);
+    if (!match) return null;
+    const videoId = match[1];
+    return `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`; // ✅ HD thumbnail
+  } catch (error) {
+    console.error("Error building YouTube thumbnail:", error);
+    return null;
+  }
 }
 
 // =====================================================
@@ -106,8 +144,10 @@ function findVimeoLink() {
     );
     if (vimeoIframe) {
       const src = vimeoIframe.src || vimeoIframe.getAttribute('data-src') || '';
-      console.log("✅ Found Vimeo iframe via DOM:", src);
-      return src;
+      if (src && hasTrustedHost(src, ["vimeo.com"])) {
+        console.log("✅ Found Vimeo iframe via DOM:", src);
+        return src;
+      }
     }
 
     // Method 3: Vimeo Universal Embed Code — uses a div with data-vimeo-id, NOT an iframe
@@ -360,7 +400,7 @@ function findBunnyVideo() {
     );
     if (bunnyIframe) {
       const src = bunnyIframe.src || bunnyIframe.getAttribute('data-src') || '';
-      if (src) {
+      if (src && hasTrustedHost(src, ["mediadelivery.net", "b-cdn.net"])) {
         console.log("✅ Found Bunny Stream iframe:", src);
         return src;
       }
@@ -417,6 +457,7 @@ function findNativeVideo() {
 // =====================================================
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
   if (req.action === "getVideoLink") {
+   try {
     console.log("🔍 Looking for video links...");
     const courseName = findCourseName();
 
@@ -486,6 +527,15 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     // Step 8: Nothing found
     console.log("❌ No video found on this page");
     sendResponse({ link: null, source: null, thumbnail: null, title: null, courseName: null });
+   } catch (error) {
+    // Defense-in-depth: every individual detector above already guards
+    // itself, but this ensures a truly unexpected error (or one from a
+    // future detector added without its own try/catch) still sends a
+    // response instead of leaving the message port hanging and the
+    // fallback chain silently broken.
+    console.error("Unexpected error while scanning for a video:", error);
+    sendResponse({ link: null, source: null, thumbnail: null, title: null, courseName: null });
+   }
   }
 
   // Return true to indicate we'll send a response asynchronously
@@ -501,8 +551,10 @@ function findWistiaLinkGeneral() {
     const wistiaIframe = document.querySelector('iframe[src*="wistia"], iframe[data-src*="wistia"]');
     if (wistiaIframe) {
       const src = wistiaIframe.src || wistiaIframe.getAttribute('data-src');
-      console.log("✅ Found Wistia iframe:", src);
-      return src;
+      if (src && hasTrustedHost(src, ["wistia.com", "wistia.net"])) {
+        console.log("✅ Found Wistia iframe:", src);
+        return src;
+      }
     }
     
     // Method 2: Look for Wistia script tags
