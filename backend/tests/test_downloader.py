@@ -20,6 +20,7 @@ from downloader import (
     resolve_output_folder,
     resolve_use_aria2c,
     sanitize_filename,
+    select_format,
     stream_stage,
 )
 
@@ -135,12 +136,81 @@ def test_build_ydl_opts_omits_aria2c_when_disabled():
 
 
 def test_build_ydl_opts_format_unchanged_regardless_of_aria2c():
-    without_aria2c = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
-    with_aria2c = build_ydl_opts(
-        "out/%(title)s.%(ext)s", None, lambda d: None, use_aria2c=True
-    )
+    with patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"):
+        without_aria2c = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+        with_aria2c = build_ydl_opts(
+            "out/%(title)s.%(ext)s", None, lambda d: None, use_aria2c=True
+        )
     assert without_aria2c["format"] == "bestvideo+bestaudio/best"
     assert with_aria2c["format"] == "bestvideo+bestaudio/best"
+
+
+def test_select_format_prefers_merge_format_when_ffmpeg_available():
+    with patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"):
+        assert select_format() == "bestvideo+bestaudio/best"
+
+
+def test_select_format_falls_back_to_single_file_when_ffmpeg_missing():
+    with patch("shutil.which", return_value=None):
+        assert select_format() == "best"
+
+
+def test_build_ydl_opts_uses_merge_format_when_ffmpeg_available():
+    with patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"):
+        opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["format"] == "bestvideo+bestaudio/best"
+
+
+def test_build_ydl_opts_falls_back_to_single_file_format_when_ffmpeg_missing():
+    with patch("shutil.which", return_value=None):
+        opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["format"] == "best"
+
+
+def test_probe_total_bytes_uses_merge_format_when_ffmpeg_available():
+    captured_opts = {}
+
+    class FakeYdl:
+        def __init__(self, opts):
+            captured_opts.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"filesize": 10}
+
+    with patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"):
+        with patch("yt_dlp.YoutubeDL", FakeYdl):
+            probe_total_bytes("https://vimeo.com/111", None)
+
+    assert captured_opts["format"] == "bestvideo+bestaudio/best"
+
+
+def test_probe_total_bytes_falls_back_to_single_file_format_when_ffmpeg_missing():
+    captured_opts = {}
+
+    class FakeYdl:
+        def __init__(self, opts):
+            captured_opts.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"filesize": 10}
+
+    with patch("shutil.which", return_value=None):
+        with patch("yt_dlp.YoutubeDL", FakeYdl):
+            probe_total_bytes("https://vimeo.com/111", None)
+
+    assert captured_opts["format"] == "best"
 
 
 def test_check_ffmpeg_available_returns_true_when_on_path():

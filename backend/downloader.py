@@ -48,6 +48,18 @@ def resolve_use_aria2c(enabled: bool) -> bool:
     return enabled and check_aria2c_available()
 
 
+def select_format() -> str:
+    """Vimeo/Loom's highest-quality formats are separate video+audio streams
+    that need ffmpeg to merge. Without ffmpeg, requesting that combination
+    doesn't gracefully degrade on its own: yt-dlp still selects it (the "/"
+    fallback only applies at format-selection time, not merge time) and then
+    hard-fails once the merge step actually runs. Checking ffmpeg's presence
+    upfront and requesting a single pre-muxed format instead avoids ever
+    hitting that failure, at the cost of a possibly lower max quality on
+    machines without ffmpeg."""
+    return "bestvideo+bestaudio/best" if check_ffmpeg_available() else "best"
+
+
 def format_speed(speed_bytes_per_sec: Optional[float]) -> Optional[str]:
     """Human-readable speed string computed from yt-dlp's numeric `speed`
     field. Deliberately does not use yt-dlp's own `_speed_str`, which embeds
@@ -146,7 +158,7 @@ def build_ydl_opts(
     use_aria2c: bool = False,
 ) -> dict:
     opts = {
-        "format": "bestvideo+bestaudio/best",
+        "format": select_format(),
         "outtmpl": output_template,
         "concurrent_fragment_downloads": concurrent_fragment_downloads,
         "progress_hooks": [progress_hook],
@@ -196,7 +208,12 @@ def probe_total_bytes(url: str, referer: Optional[str]) -> Optional[int]:
     import yt_dlp
 
     opts = {
-        "format": "bestvideo+bestaudio/best",
+        # Must match build_ydl_opts' own format selection exactly, or this
+        # probe's size lookahead would describe a different set of streams
+        # than what actually gets downloaded (e.g. reporting the video+audio
+        # combo's size while the real download falls back to a single file),
+        # throwing the progress bar's percentage off.
+        "format": select_format(),
         "quiet": True,
         "no_warnings": True,
     }
