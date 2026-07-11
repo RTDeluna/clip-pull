@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { spawn, exec } = require("child_process");
+const { spawn, exec, execSync } = require("child_process");
 const http = require("http");
 
 // Without this, Windows notifications/taskbar grouping fall back to a
@@ -17,6 +17,10 @@ const BACKEND_HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`;
 
 let backendProcess = null;
 let mainWindow = null;
+// Distinguishes "we killed the backend on purpose" (quitting) from "it
+// died on its own" (crash) — the exit handler below only alerts the user
+// for the latter.
+let isShuttingDown = false;
 
 function getBackendExecutablePath() {
   const exeName = process.platform === "win32" ? "clippull-backend.exe" : "clippull-backend";
@@ -24,6 +28,7 @@ function getBackendExecutablePath() {
 }
 
 function spawnBackend() {
+  isShuttingDown = false;
   if (app.isPackaged) {
     const dbPath = path.join(app.getPath("userData"), "clip_pull.db");
     backendProcess = spawn(getBackendExecutablePath(), [], {
@@ -40,6 +45,20 @@ function spawnBackend() {
   backendProcess.on("error", (err) => {
     console.error("Failed to start backend:", err);
   });
+  // Without this, a mid-session backend crash (unhandled Python exception,
+  // segfault, OOM) left the window open and looking alive while every
+  // action silently failed — nothing previously watched for this.
+  backendProcess.on("exit", (code, signal) => {
+    backendProcess = null;
+    if (isShuttingDown) return;
+    console.error(`Backend exited unexpectedly (code=${code}, signal=${signal}).`);
+    dialog.showErrorBox(
+      "CLIP.PULL backend stopped",
+      "The download engine stopped unexpectedly and can't continue this " +
+        "session. Please restart CLIP.PULL. If this keeps happening, check " +
+        "that no antivirus software is blocking the app."
+    );
+  });
 }
 
 // backendProcess.kill() only signals that one PID — on Windows it doesn't
@@ -47,11 +66,21 @@ function spawnBackend() {
 // spawned aria2c/ffmpeg as children, those (and sometimes the backend exe
 // itself) can survive after the app window closes. taskkill's /T flag kills
 // the whole tree; plain .kill() is fine on macOS/Linux, which use real
-// signals.
+// signals. Uses the synchronous exec variant deliberately: the app is about
+// to quit right after this runs, so it needs to actually finish the kill
+// before quitting, not fire-and-forget it (which previously let app.quit()
+// proceed before the tree was actually torn down).
 function killBackend() {
+  isShuttingDown = true;
   if (!backendProcess) return;
   if (process.platform === "win32") {
-    exec(`taskkill /pid ${backendProcess.pid} /f /t`);
+    try {
+      execSync(`taskkill /pid ${backendProcess.pid} /f /t`);
+    } catch (err) {
+      // taskkill exits non-zero if the process already ended on its own —
+      // not a real failure, nothing left to clean up either way.
+      console.error("taskkill failed (process may have already exited):", err.message);
+    }
   } else {
     backendProcess.kill();
   }
@@ -61,6 +90,12 @@ function killBackend() {
 function waitForBackend(retriesLeft, onReady) {
   if (retriesLeft <= 0) {
     console.error("Backend did not become ready in time.");
+    dialog.showErrorBox(
+      "CLIP.PULL is having trouble starting",
+      "The download engine didn't respond in time. The app will still " +
+        "open, but downloads may not work. If this keeps happening, check " +
+        "that no antivirus software is blocking the app, then restart CLIP.PULL."
+    );
     onReady();
     return;
   }
@@ -93,22 +128,36 @@ function createWindow() {
 }
 
 ipcMain.handle("choose-folder", async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ["openDirectory"],
-  });
-  if (result.canceled || result.filePaths.length === 0) {
-    return null;
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  } catch (err) {
+    console.error("choose-folder failed:", err);
+    throw err;
   }
-  return result.filePaths[0];
 });
 
 ipcMain.handle("reveal-file", (_, filePath) => {
-  shell.showItemInFolder(filePath);
+  try {
+    shell.showItemInFolder(filePath);
+  } catch (err) {
+    console.error("reveal-file failed:", err);
+    throw err;
+  }
 });
 
 function execCommand(command) {
   return new Promise((resolve, reject) => {
-    exec(command, (error, stdout) => {
+    // Without a timeout, a hung reg.exe/browser launch would await forever
+    // here — hanging the open-chrome-extensions IPC handler (and the
+    // button that calls it) permanently, with no way to recover short of
+    // restarting the app.
+    exec(command, { timeout: 5000 }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });
