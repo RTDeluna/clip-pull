@@ -128,6 +128,14 @@ def test_humanize_error_reason_rewrites_disk_full_errors():
     assert "Not enough disk space" in reason
 
 
+def test_humanize_error_reason_rewrites_fat32_file_too_large_errors():
+    exc = Exception("[WinError 223] The file size exceeds the limit allowed and cannot be saved: 'a.mp4'")
+    reason = humanize_error_reason(exc)
+    assert "WinError" not in reason
+    assert "FAT32" in reason
+    assert "Not enough disk space" not in reason
+
+
 def test_humanize_error_reason_rewrites_no_formats_errors():
     exc = Exception("ERROR: [vimeo] 000000000: No video formats found!")
     reason = humanize_error_reason(exc)

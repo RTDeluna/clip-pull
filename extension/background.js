@@ -13,6 +13,10 @@ function notify(id, title, message) {
     iconUrl: "Icons/icon128.png",
     title,
     message,
+  }, () => {
+    if (chrome.runtime.lastError) {
+      console.error("notify failed:", chrome.runtime.lastError.message);
+    }
   });
 }
 

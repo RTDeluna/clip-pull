@@ -46,8 +46,16 @@ function formatSpeed(speed) {
 function formatEta(eta) {
   if (eta === null || eta === undefined) return "--";
   const totalSeconds = Math.max(0, Math.floor(eta));
-  const minutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+  // A wildly-off estimate (e.g. right after a stream transition, before the
+  // speed average has settled) previously showed as something like
+  // "16666:40 left" -- not a helpful countdown at that point, so cap it.
+  if (hours > 99) return "99h+ left";
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")} left`;
+  }
   return `${minutes}:${String(seconds).padStart(2, "0")} left`;
 }
 
@@ -152,14 +160,14 @@ function renderRow(entry, { announceCompletion = true } = {}) {
     };
     rows.set(entry.id, state);
 
-    el.querySelector(".retry-btn").addEventListener("click", () => {
-      retryEntry(entry.id);
+    el.querySelector(".retry-btn").addEventListener("click", (event) => {
+      retryEntry(entry.id, event.currentTarget);
     });
-    el.querySelector(".pause-btn").addEventListener("click", () => {
-      pauseEntry(entry.id);
+    el.querySelector(".pause-btn").addEventListener("click", (event) => {
+      pauseEntry(entry.id, event.currentTarget);
     });
-    el.querySelector(".resume-btn").addEventListener("click", () => {
-      resumeEntry(entry.id);
+    el.querySelector(".resume-btn").addEventListener("click", (event) => {
+      resumeEntry(entry.id, event.currentTarget);
     });
   }
   const row = state.el;
@@ -330,7 +338,8 @@ new ResizeObserver(() => {
 }).observe(urlsInput);
 renderGutter();
 
-async function retryEntry(entryId) {
+async function retryEntry(entryId, button) {
+  if (button) button.disabled = true;
   try {
     const response = await fetch(`${API_BASE}/queue/${entryId}/retry`, {
       method: "POST",
@@ -344,10 +353,13 @@ async function retryEntry(entryId) {
     showToast("Queued for retry", "success");
   } catch (error) {
     showToast("Retry failed: " + error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
-async function pauseEntry(entryId) {
+async function pauseEntry(entryId, button) {
+  if (button) button.disabled = true;
   try {
     const response = await fetch(`${API_BASE}/queue/${entryId}/pause`, { method: "POST" });
     if (!response.ok) {
@@ -357,10 +369,13 @@ async function pauseEntry(entryId) {
     showToast("Paused", "success");
   } catch (error) {
     showToast("Failed to reach the backend: " + error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
-async function resumeEntry(entryId) {
+async function resumeEntry(entryId, button) {
+  if (button) button.disabled = true;
   try {
     const response = await fetch(`${API_BASE}/queue/${entryId}/resume`, {
       method: "POST",
@@ -374,6 +389,8 @@ async function resumeEntry(entryId) {
     showToast("Resumed", "success");
   } catch (error) {
     showToast("Resume failed: " + error.message, "error");
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 

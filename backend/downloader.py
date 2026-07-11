@@ -136,6 +136,18 @@ FRIENDLY_ERROR_RULES: list[tuple["re.Pattern[str]", str]] = [
         "Not enough disk space on the destination drive. Free up space and hit Retry.",
     ),
     (
+        # WinError 223 (ERROR_FILE_TOO_LARGE) and Errno 27 (EFBIG) are what
+        # Windows/Python report when a single file would exceed FAT32's
+        # 4GB-per-file limit -- distinct from actually running out of disk
+        # space, so it needs its own message pointing at the real fix
+        # (reformat/choose an NTFS or exFAT drive) rather than "free up space".
+        re.compile(r"WinError 223|\[Errno 27\]|File too large", re.IGNORECASE),
+        "This video is larger than 4GB, which exceeds the FAT32 file size limit "
+        "on the destination drive. Choose an output folder on an NTFS or exFAT "
+        "drive instead (FAT32 USB drives and SD cards are commonly formatted "
+        "this way).",
+    ),
+    (
         re.compile(r"\[Errno 2\]|No such file or directory", re.IGNORECASE),
         "The download was interrupted before it finished writing to disk. "
         "Hit Retry to start it again.",
