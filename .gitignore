@@ -8,6 +8,7 @@ dist/
 build/
 .pytest_cache/
 backend/data/
+backend/vendor/
 *.spec
 assets/extension/*.zip
 .superpowers/

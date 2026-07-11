@@ -15,6 +15,7 @@ from downloader import (
     check_ffmpeg_available,
     format_bytes,
     format_speed,
+    get_bundled_ffmpeg_path,
     humanize_error_reason,
     is_referer_blocked_error,
     probe_total_bytes,
@@ -283,6 +284,47 @@ def test_check_ffmpeg_available_returns_true_when_on_path():
 def test_check_ffmpeg_available_returns_false_when_missing():
     with patch("shutil.which", return_value=None):
         assert check_ffmpeg_available() is False
+
+
+def test_get_bundled_ffmpeg_path_returns_none_when_env_var_unset(monkeypatch):
+    monkeypatch.delenv("CLIP_PULL_FFMPEG_PATH", raising=False)
+    assert get_bundled_ffmpeg_path() is None
+
+
+def test_get_bundled_ffmpeg_path_returns_none_when_file_does_not_exist(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLIP_PULL_FFMPEG_PATH", str(tmp_path / "nonexistent-ffmpeg.exe"))
+    assert get_bundled_ffmpeg_path() is None
+
+
+def test_get_bundled_ffmpeg_path_returns_path_when_file_exists(monkeypatch, tmp_path):
+    bundled = tmp_path / "ffmpeg.exe"
+    bundled.write_bytes(b"")
+    monkeypatch.setenv("CLIP_PULL_FFMPEG_PATH", str(bundled))
+    assert get_bundled_ffmpeg_path() == str(bundled)
+
+
+def test_check_ffmpeg_available_returns_true_from_bundled_path_even_without_system_ffmpeg(
+    monkeypatch, tmp_path
+):
+    bundled = tmp_path / "ffmpeg.exe"
+    bundled.write_bytes(b"")
+    monkeypatch.setenv("CLIP_PULL_FFMPEG_PATH", str(bundled))
+    with patch("shutil.which", return_value=None):
+        assert check_ffmpeg_available() is True
+
+
+def test_build_ydl_opts_sets_ffmpeg_location_when_bundled(monkeypatch, tmp_path):
+    bundled = tmp_path / "ffmpeg.exe"
+    bundled.write_bytes(b"")
+    monkeypatch.setenv("CLIP_PULL_FFMPEG_PATH", str(bundled))
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["ffmpeg_location"] == str(bundled)
+
+
+def test_build_ydl_opts_omits_ffmpeg_location_when_not_bundled(monkeypatch):
+    monkeypatch.delenv("CLIP_PULL_FFMPEG_PATH", raising=False)
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert "ffmpeg_location" not in opts
 
 
 def test_format_speed_formats_bytes_per_second_human_readable():

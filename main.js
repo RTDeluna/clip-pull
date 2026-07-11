@@ -27,19 +27,34 @@ function getBackendExecutablePath() {
   return path.join(__dirname, "backend", "dist", exeName);
 }
 
+// Bundled at build time by scripts/fetch-ffmpeg.ps1 into backend/vendor/,
+// the same way clippull-backend.exe lands in backend/dist/ -- so this
+// resolves consistently whether running from source or packaged. Only
+// non-null if the file is actually there: older installs built before
+// bundling was added, or a dev machine that never ran the fetch script,
+// fall back to check_ffmpeg_available()'s system-PATH lookup instead.
+function getBundledFfmpegPath() {
+  const exeName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const ffmpegPath = path.join(__dirname, "backend", "vendor", exeName);
+  return fs.existsSync(ffmpegPath) ? ffmpegPath : null;
+}
+
 function spawnBackend() {
   isShuttingDown = false;
+  const bundledFfmpeg = getBundledFfmpegPath();
+  const ffmpegEnv = bundledFfmpeg ? { CLIP_PULL_FFMPEG_PATH: bundledFfmpeg } : {};
   if (app.isPackaged) {
     const dbPath = path.join(app.getPath("userData"), "clip_pull.db");
     backendProcess = spawn(getBackendExecutablePath(), [], {
       stdio: "inherit",
-      env: { ...process.env, CLIP_PULL_DB_PATH: dbPath },
+      env: { ...process.env, CLIP_PULL_DB_PATH: dbPath, ...ffmpegEnv },
       windowsHide: true,
     });
   } else {
     backendProcess = spawn("python", ["main.py"], {
       cwd: path.join(__dirname, "backend"),
       stdio: "inherit",
+      env: { ...process.env, ...ffmpegEnv },
     });
   }
   backendProcess.on("error", (err) => {

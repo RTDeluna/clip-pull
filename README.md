@@ -16,6 +16,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 - [The Extension tab (Skool Video Downloader)](#the-extension-tab-skool-video-downloader)
 - [Tips & troubleshooting](#tips--troubleshooting)
 - [Running from source / building installers](#running-from-source--building-installers)
+- [Third-party software](#third-party-software)
 - [Releasing](#releasing)
 
 ---
@@ -31,7 +32,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 ## Requirements
 
 - **Windows 10/11** or **macOS**.
-- **ffmpeg** on your system `PATH`. High-quality downloads come down as separate video and audio streams that ffmpeg merges — without it, downloads may fail or fall back to lower quality. Get it from [ffmpeg.org](https://ffmpeg.org/download.html) or your package manager (`winget install ffmpeg`, `brew install ffmpeg`).
+- **ffmpeg** — bundled with the Windows installer, nothing to install yourself. High-quality downloads come down as separate video and audio streams that ffmpeg merges; without it, downloads fall back to a lower-quality pre-merged format instead of failing. (See [Third-party software](#third-party-software) below.)
 - **aria2c** (optional). If it's on your `PATH`, CLIP.PULL can use it as a faster multi-connection downloader — toggle it in Settings. The app works fine without it.
 
 ## Installing
@@ -114,7 +115,7 @@ If the extension can't reach CLIP.PULL, make sure the app is open — it talks t
 
 - **Download fails immediately with a referer/blocked error** — the source site requires its own domain as the referer. Add the course site's URL to the **Referer domain** field on the Queue tab and retry.
 - **Downloads are slow** — install aria2c and enable it in Settings, or raise **Fragment concurrency**.
-- **A video downloads without sound, or fails partway through merging** — install ffmpeg and make sure it's on your `PATH`, then retry.
+- **A video comes down at lower quality than expected** — this happens if the bundled ffmpeg couldn't be found (e.g. a very old install). Reinstalling the latest version restores full-quality merged downloads.
 - **The extension says CLIP.PULL isn't running** — open the app first; the extension only works while it's running.
 - **The extension says no output folder is set** — set a **Default output folder** in the app's Settings tab.
 - **History or Settings seem to reset between launches** — this was a known issue in early packaged builds where the local database wasn't stored in a stable location; it's fixed as of this build. If you still see it, please report it.
@@ -128,7 +129,7 @@ npm install                # install Electron + electron-builder
 npm start                  # run in dev mode (spawns `python main.py` from backend/)
 ```
 
-Dev mode requires Python 3 with `backend/requirements.txt` installed (`pip install -r backend/requirements.txt`) plus ffmpeg on your `PATH`.
+Dev mode requires Python 3 with `backend/requirements.txt` installed (`pip install -r backend/requirements.txt`) plus either ffmpeg on your `PATH` or a local copy fetched via `npm run fetch:ffmpeg` (see below).
 
 To produce a distributable, unsigned installer for the platform you're on:
 
@@ -136,7 +137,11 @@ To produce a distributable, unsigned installer for the platform you're on:
 npm run dist
 ```
 
-This builds the standalone backend executable with PyInstaller, packages the Chrome extension, and runs electron-builder — producing an NSIS installer on Windows or a `.zip` on macOS. Because PyInstaller doesn't cross-compile, building a real macOS artifact requires running this command on an actual Mac (with Python + PyInstaller installed there too); running it on Windows only produces the Windows installer.
+This fetches a bundled ffmpeg build (skipped if already downloaded), builds the standalone backend executable with PyInstaller, packages the Chrome extension, and runs electron-builder — producing an NSIS installer on Windows or a `.zip` on macOS. Because PyInstaller doesn't cross-compile, building a real macOS artifact requires running this command on an actual Mac (with Python + PyInstaller installed there too); running it on Windows only produces the Windows installer.
+
+## Third-party software
+
+The Windows installer bundles [ffmpeg](https://ffmpeg.org) (a static `ffmpeg.exe`, no source changes) so downloads merge at full quality without requiring a separate install. The bundled build is licensed under the [GNU LGPL v3](https://www.gnu.org/licenses/lgpl-3.0.html) — see `backend/vendor/FFMPEG_LICENSE.txt` after running `npm run fetch:ffmpeg`, or the license text at the link above. ffmpeg's source is available at [ffmpeg.org](https://ffmpeg.org) and from the build's own source at [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds).
 
 ## Releasing
 

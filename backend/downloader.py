@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 import shutil
 import time
@@ -39,8 +40,17 @@ def resolve_output_folder(base_folder: str, subfolder: Optional[str]) -> str:
     return str(Path(base_folder) / sanitize_filename(subfolder))
 
 
+def get_bundled_ffmpeg_path() -> Optional[str]:
+    """Path to the ffmpeg binary bundled with the packaged app, if main.js
+    found one alongside the backend and passed it down via env var. None in
+    dev runs or older installs without a bundled copy, where ffmpeg has to
+    come from the system PATH instead (see check_ffmpeg_available)."""
+    path = os.environ.get("CLIP_PULL_FFMPEG_PATH")
+    return path if path and os.path.isfile(path) else None
+
+
 def check_ffmpeg_available() -> bool:
-    return shutil.which("ffmpeg") is not None
+    return get_bundled_ffmpeg_path() is not None or shutil.which("ffmpeg") is not None
 
 
 def check_aria2c_available() -> bool:
@@ -221,6 +231,12 @@ def build_ydl_opts(
         "windowsfilenames": True,
         "trim_filenames": 150,
     }
+    bundled_ffmpeg = get_bundled_ffmpeg_path()
+    if bundled_ffmpeg:
+        # Without this, yt-dlp falls back to searching PATH on its own --
+        # pointless on a packaged install where ffmpeg was never added to
+        # PATH in the first place, only unpacked alongside the backend exe.
+        opts["ffmpeg_location"] = bundled_ffmpeg
     if referer:
         opts["http_headers"] = {"Referer": referer}
     if use_aria2c:
@@ -274,6 +290,9 @@ def probe_total_bytes(url: str, referer: Optional[str]) -> Optional[int]:
         "retries": 10,
         "socket_timeout": 30,
     }
+    bundled_ffmpeg = get_bundled_ffmpeg_path()
+    if bundled_ffmpeg:
+        opts["ffmpeg_location"] = bundled_ffmpeg
     if referer:
         opts["http_headers"] = {"Referer": referer}
     try:
