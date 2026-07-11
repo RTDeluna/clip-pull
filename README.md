@@ -7,6 +7,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 ## Table of contents
 
 - [What it does](#what-it-does)
+- [Supported sites](#supported-sites)
 - [Requirements](#requirements)
 - [Installing](#installing)
 - [Quick start](#quick-start)
@@ -28,6 +29,22 @@ Paste video links, pick a folder, and download them in parallel with live progre
 - Supports a **referer domain** for videos that are embedded on a course site and reject direct requests without it.
 - Detects links you've already downloaded and asks whether to skip or re-queue them.
 - Ships a Chrome extension that watches Skool lesson pages (and Loom pages) for a playable video — Skool Native (Mux), YouTube, Vimeo, Loom, Wistia, or Bunny Stream — and sends it to CLIP.PULL's queue with one click, no copy-pasting required.
+
+## Supported sites
+
+The **Queue tab** downloads from any link [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports — that covers YouTube, Vimeo, Loom, Wistia, and well over a thousand other sites out of the box, with nothing platform-specific required. Just paste the URL.
+
+The **Chrome extension** is more targeted: it watches the page you're on for a playable video and sends the link to CLIP.PULL for you, one click, no copy-pasting. It currently detects:
+
+- [x] Vimeo
+- [x] Loom
+- [x] YouTube
+- [x] Wistia
+- [x] Bunny Stream
+- [x] Skool Native video (Mux) — Skool's own built-in player, launched July 2025
+- [x] Any other direct `<video>` element embed, as a last-resort fallback
+
+If a page's video isn't on that list, paste its direct URL into the Queue tab instead — it'll work as long as yt-dlp has an extractor for that site.
 
 ## Requirements
 
