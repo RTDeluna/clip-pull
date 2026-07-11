@@ -10,7 +10,14 @@ function setStatus(message, isError = false) {
 }
 
 async function refreshPackageInfo() {
-  const info = await window.api?.getExtensionPackageInfo?.();
+  let info;
+  try {
+    info = await window.api?.getExtensionPackageInfo?.();
+  } catch (error) {
+    setStatus("Failed to reach the app: " + error.message, true);
+    downloadBtn.disabled = true;
+    return;
+  }
   if (info?.filename) {
     setStatus(`Ready to download: ${info.filename}`);
     downloadBtn.disabled = false;

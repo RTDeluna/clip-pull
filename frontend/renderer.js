@@ -378,9 +378,13 @@ async function resumeEntry(entryId) {
 }
 
 browseBtn.addEventListener("click", async () => {
-  const folder = await window.api.chooseFolder();
-  if (folder) {
-    outputFolderInput.value = folder;
+  try {
+    const folder = await window.api.chooseFolder();
+    if (folder) {
+      outputFolderInput.value = folder;
+    }
+  } catch (error) {
+    showToast("Couldn't open the folder picker: " + error.message, "error");
   }
 });
 

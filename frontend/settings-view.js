@@ -41,8 +41,12 @@ async function loadSettings(retriesLeft = 10) {
 }
 
 browseBtn.addEventListener("click", async () => {
-  const folder = await window.api.chooseFolder();
-  if (folder) defaultFolderInput.value = folder;
+  try {
+    const folder = await window.api.chooseFolder();
+    if (folder) defaultFolderInput.value = folder;
+  } catch (error) {
+    showToast("Couldn't open the folder picker: " + error.message, "error");
+  }
 });
 
 saveBtn.addEventListener("click", async () => {
