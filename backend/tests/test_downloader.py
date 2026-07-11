@@ -1,6 +1,7 @@
 import asyncio
 import threading
 import time
+from collections import namedtuple
 from pathlib import Path
 from unittest.mock import patch
 
@@ -104,6 +105,42 @@ def test_humanize_error_reason_strips_ansi_codes_for_unmapped_errors():
     assert reason == "ERROR: Something unexpected happened"
 
 
+def test_humanize_error_reason_rewrites_path_too_long_errors():
+    exc = Exception("[WinError 206] The filename or extension is too long: 'a.mp4'")
+    reason = humanize_error_reason(exc)
+    assert "WinError" not in reason
+    assert "too long for" in reason
+
+
+def test_humanize_error_reason_does_not_confuse_generic_path_not_found_with_too_long():
+    # WinError 3 (path not found) is deliberately NOT treated as "too long" -
+    # it's ambiguous (could be a deleted/missing folder instead), so it falls
+    # through to the raw message rather than risk misdiagnosing the cause.
+    exc = Exception("[WinError 3] The system cannot find the path specified: 'C:\\gone'")
+    reason = humanize_error_reason(exc)
+    assert "too long for" not in reason
+
+
+def test_humanize_error_reason_rewrites_disk_full_errors():
+    exc = Exception("[WinError 112] There is not enough space on the disk: 'a.mp4'")
+    reason = humanize_error_reason(exc)
+    assert "WinError" not in reason
+    assert "Not enough disk space" in reason
+
+
+def test_humanize_error_reason_rewrites_no_formats_errors():
+    exc = Exception("ERROR: [vimeo] 000000000: No video formats found!")
+    reason = humanize_error_reason(exc)
+    assert "No video formats found" not in reason
+    assert "isn't downloadable" in reason
+
+
+def test_humanize_error_reason_rewrites_drm_errors():
+    exc = Exception("ERROR: This video is DRM protected")
+    reason = humanize_error_reason(exc)
+    assert "isn't downloadable" in reason
+
+
 def test_concurrent_fragment_downloads_increased_beyond_original_default():
     assert CONCURRENT_FRAGMENT_DOWNLOADS > 5
 
@@ -111,6 +148,23 @@ def test_concurrent_fragment_downloads_increased_beyond_original_default():
 def test_build_ydl_opts_uses_named_fragment_concurrency_constant():
     opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
     assert opts["concurrent_fragment_downloads"] == CONCURRENT_FRAGMENT_DOWNLOADS
+
+
+def test_build_ydl_opts_sets_retry_and_timeout_config():
+    # yt-dlp used as a library (not via its own CLI) applies none of the
+    # CLI's default retry counts on its own -- these must be set explicitly,
+    # or a single transient network blip aborts a download with no retry.
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["retries"] == 10
+    assert opts["fragment_retries"] == 10
+    assert opts["file_access_retries"] == 10
+    assert opts["socket_timeout"] == 30
+
+
+def test_build_ydl_opts_bounds_generated_filenames():
+    opts = build_ydl_opts("out/%(title)s.%(ext)s", None, lambda d: None)
+    assert opts["windowsfilenames"] is True
+    assert opts["trim_filenames"] == 150
 
 
 def test_check_aria2c_available_returns_true_when_on_path():
@@ -391,6 +445,65 @@ def test_download_entry_sets_referer_blocked_message_on_403():
     assert "referer" in updated.error_reason.lower()
 
 
+def test_download_entry_fails_fast_with_friendly_message_when_disk_too_full():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    download_fn_called = {"value": False}
+
+    def should_not_run(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        download_fn_called["value"] = True
+        return {"title": "Lesson 1"}
+
+    usage = namedtuple("usage", ["total", "used", "free"])
+    with patch("shutil.disk_usage", return_value=usage(total=1000, used=990, free=10)):
+        orchestrator = DownloadOrchestrator(
+            manager, download_fn=should_not_run, probe_fn=lambda url, referer: 500
+        )
+        asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    updated = manager.get(entry.id)
+    assert updated.status == "error"
+    assert "Not enough disk space" in updated.error_reason
+    # Fails before ever attempting the real download -- no wasted bandwidth/time.
+    assert download_fn_called["value"] is False
+
+
+def test_download_entry_proceeds_when_disk_space_is_sufficient():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1"}
+
+    usage = namedtuple("usage", ["total", "used", "free"])
+    with patch("shutil.disk_usage", return_value=usage(total=1000, used=100, free=900)):
+        orchestrator = DownloadOrchestrator(
+            manager, download_fn=fake_download, probe_fn=lambda url, referer: 500
+        )
+        asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert manager.get(entry.id).status == "done"
+
+
+def test_download_entry_skips_disk_check_when_size_unknown():
+    # probe_fn returning None (size couldn't be determined upfront) must not
+    # block the download -- shutil.disk_usage is never even consulted.
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        return {"title": "Lesson 1"}
+
+    with patch("shutil.disk_usage") as mock_disk_usage:
+        orchestrator = DownloadOrchestrator(
+            manager, download_fn=fake_download, probe_fn=lambda url, referer: None
+        )
+        asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    mock_disk_usage.assert_not_called()
+    assert manager.get(entry.id).status == "done"
+
+
 def test_progress_hook_throttles_rapid_updates():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -551,6 +664,29 @@ def test_probe_total_bytes_includes_referer_header_when_provided():
         probe_total_bytes("https://vimeo.com/111", "https://school.com")
 
     assert captured_opts["http_headers"] == {"Referer": "https://school.com"}
+
+
+def test_probe_total_bytes_sets_retry_and_timeout_config():
+    captured_opts = {}
+
+    class FakeYdl:
+        def __init__(self, opts):
+            captured_opts.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download):
+            return {"filesize": 10}
+
+    with patch("yt_dlp.YoutubeDL", FakeYdl):
+        probe_total_bytes("https://vimeo.com/111", None)
+
+    assert captured_opts["retries"] == 10
+    assert captured_opts["socket_timeout"] == 30
 
 
 def test_progress_hook_computes_weighted_percent_across_two_streams_when_probe_available():

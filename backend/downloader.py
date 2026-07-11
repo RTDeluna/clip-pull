@@ -117,6 +117,22 @@ FRIENDLY_ERROR_RULES: list[tuple["re.Pattern[str]", str]] = [
         "and hit Retry.",
     ),
     (
+        # Checked before the generic Errno-2 rule below: a too-long path can
+        # otherwise get misdiagnosed as "interrupted, hit Retry" -- retrying
+        # would fail identically every time, since the real cause (path
+        # length) never changes. WinError 206 and ENAMETOOLONG are
+        # unambiguous signals for this specific condition (unlike bare
+        # WinError 3, which can also mean an unrelated missing/deleted path).
+        re.compile(r"WinError 206|File name too long|\[Errno 36\]", re.IGNORECASE),
+        "This video's title makes the destination file path too long for "
+        "Windows. Try a shorter Course/batch folder name, or choose an "
+        "output folder closer to your drive's root (e.g. C:\\Downloads).",
+    ),
+    (
+        re.compile(r"WinError 112|\[Errno 28\]|No space left on device", re.IGNORECASE),
+        "Not enough disk space on the destination drive. Free up space and hit Retry.",
+    ),
+    (
         re.compile(r"\[Errno 2\]|No such file or directory", re.IGNORECASE),
         "The download was interrupted before it finished writing to disk. "
         "Hit Retry to start it again.",
@@ -124,6 +140,16 @@ FRIENDLY_ERROR_RULES: list[tuple["re.Pattern[str]", str]] = [
     (
         re.compile(r"HTTP Error 404|404: Not Found", re.IGNORECASE),
         "This video couldn't be found — the link may be private, deleted, or mistyped.",
+    ),
+    (
+        re.compile(
+            r"No video formats found|Requested format is not available|"
+            r"DRM protected|requires payment|members-only|"
+            r"only available for registered users",
+            re.IGNORECASE,
+        ),
+        "This video isn't downloadable — it may be DRM-protected, private, "
+        "members-only, or otherwise restricted at the source.",
     ),
     (
         re.compile(
@@ -165,6 +191,20 @@ def build_ydl_opts(
         "postprocessor_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
+        # yt-dlp used as a library (not via its own CLI) gets none of the
+        # CLI's default retry counts -- leaving these unset means 0 retries,
+        # so a single transient blip anywhere in a long download aborts the
+        # whole thing. These match yt-dlp's own CLI defaults.
+        "retries": 10,
+        "fragment_retries": 10,
+        "file_access_retries": 10,
+        "socket_timeout": 30,
+        # Keeps generated filenames Windows-safe and bounded well under the
+        # 260-char MAX_PATH, so a long video title can't silently produce an
+        # unwritable path (see FRIENDLY_ERROR_RULES for the residual case
+        # where the destination folder itself is already deeply nested).
+        "windowsfilenames": True,
+        "trim_filenames": 150,
     }
     if referer:
         opts["http_headers"] = {"Referer": referer}
@@ -216,6 +256,8 @@ def probe_total_bytes(url: str, referer: Optional[str]) -> Optional[int]:
         "format": select_format(),
         "quiet": True,
         "no_warnings": True,
+        "retries": 10,
+        "socket_timeout": 30,
     }
     if referer:
         opts["http_headers"] = {"Referer": referer}
@@ -239,6 +281,15 @@ class DownloadPaused(Exception):
     moment a pause is requested. asyncio.Task.cancel() alone can't
     interrupt code already running inside a ThreadPoolExecutor thread, so
     this cooperative check-and-raise is what actually stops the download."""
+
+
+class InsufficientDiskSpaceError(Exception):
+    """Raised before attempting a download when the destination drive
+    doesn't have enough free space for the video's known size — reported
+    immediately with an actionable message, instead of after wasting time
+    and bandwidth partway through, or as a confusing raw OS error. Its own
+    str() is already the friendly message, since it can't match any of
+    FRIENDLY_ERROR_RULES (those are for real yt-dlp/OS error text)."""
 
 
 class DownloadOrchestrator:
@@ -432,6 +483,22 @@ class DownloadOrchestrator:
                 )
 
             try:
+                # Only checkable when the probe knew the video's size ahead
+                # of time; if it didn't, this is skipped and a mid-download
+                # "disk full" still gets a friendly message via
+                # FRIENDLY_ERROR_RULES instead of a raw OS error.
+                if expected_total_bytes:
+                    try:
+                        free_bytes = shutil.disk_usage(output_folder).free
+                    except OSError:
+                        free_bytes = None
+                    if free_bytes is not None and free_bytes < expected_total_bytes:
+                        raise InsufficientDiskSpaceError(
+                            f"Not enough disk space — this download needs about "
+                            f"{format_bytes(expected_total_bytes)} but only "
+                            f"{format_bytes(free_bytes)} is free on that drive."
+                        )
+
                 info = await loop.run_in_executor(
                     None,
                     self.download_fn,
