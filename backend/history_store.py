@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 from typing import Optional, Union
 
@@ -7,6 +8,14 @@ from db import get_connection
 class HistoryStore:
     def __init__(self, db_path: Union[str, Path] = ":memory:"):
         self._conn = get_connection(db_path)
+        # This one connection is shared across FastAPI's sync-route
+        # threadpool (get_history, delete_history_entry, clear_history) and
+        # the event-loop thread (record() called from download completion
+        # callbacks) -- SQLite's own thread-safety for a single connection
+        # accessed concurrently from multiple threads isn't guaranteed by
+        # the sqlite3 module's docs, so serialize explicitly rather than
+        # relying on it.
+        self._lock = threading.Lock()
 
     def record(
         self,
@@ -21,23 +30,24 @@ class HistoryStore:
         error_reason: Optional[str],
         retry_count: int,
     ) -> dict:
-        cursor = self._conn.execute(
-            """
-            INSERT INTO history
-              (entry_id, batch_id, url, title, output_path, total_size,
-               status, error_reason, retry_count, finished_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """,
-            (
-                entry_id, batch_id, url, title, output_path, total_size,
-                status, error_reason, retry_count,
-            ),
-        )
-        self._conn.commit()
-        row = self._conn.execute(
-            "SELECT * FROM history WHERE id = ?", (cursor.lastrowid,)
-        ).fetchone()
-        return dict(row)
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                INSERT INTO history
+                  (entry_id, batch_id, url, title, output_path, total_size,
+                   status, error_reason, retry_count, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    entry_id, batch_id, url, title, output_path, total_size,
+                    status, error_reason, retry_count,
+                ),
+            )
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT * FROM history WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+            return dict(row)
 
     def search(
         self,
@@ -57,16 +67,18 @@ class HistoryStore:
             params.append(status)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.extend([limit, offset])
-        rows = self._conn.execute(
-            f"SELECT * FROM history {where} ORDER BY id DESC LIMIT ? OFFSET ?",
-            params,
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM history {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+                params,
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def delete(self, entry_id: int) -> bool:
-        cursor = self._conn.execute("DELETE FROM history WHERE id = ?", (entry_id,))
-        self._conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM history WHERE id = ?", (entry_id,))
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def clear(self, query: Optional[str] = None, status: Optional[str] = None) -> int:
         conditions = []
@@ -79,16 +91,18 @@ class HistoryStore:
             conditions.append("status = ?")
             params.append(status)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        cursor = self._conn.execute(f"DELETE FROM history {where}", params)
-        self._conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self._conn.execute(f"DELETE FROM history {where}", params)
+            self._conn.commit()
+            return cursor.rowcount
 
     def was_previously_downloaded(self, urls: list[str]) -> set[str]:
         if not urls:
             return set()
         placeholders = ",".join("?" for _ in urls)
-        rows = self._conn.execute(
-            f"SELECT DISTINCT url FROM history WHERE status = 'done' AND url IN ({placeholders})",
-            urls,
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT url FROM history WHERE status = 'done' AND url IN ({placeholders})",
+                urls,
+            ).fetchall()
         return {row["url"] for row in rows}

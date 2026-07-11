@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from background_tasks import track_task
@@ -12,6 +12,12 @@ from history_store import HistoryStore
 from queue_manager import QueueManager
 from settings_store import SettingsStore
 from url_validation import parse_url_list
+
+# A generous cap for a course-links paste, not a hard technical limit -- past
+# this, a single batch would grow the in-memory queue and every WS
+# sync/update_batch payload without bound, and is far more likely to be a
+# mistake (pasted the wrong thing) than a real batch.
+MAX_URLS_PER_BATCH = 500
 
 
 class QueueRequest(BaseModel):
@@ -47,6 +53,15 @@ def build_queue_router(
     @router.post("/queue", status_code=202)
     async def post_queue(request: QueueRequest) -> dict:
         valid_urls, invalid_lines = parse_url_list(request.urls_text)
+        if len(valid_urls) + len(invalid_lines) > MAX_URLS_PER_BATCH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"That's {len(valid_urls) + len(invalid_lines)} lines — "
+                    f"batches are capped at {MAX_URLS_PER_BATCH} links. "
+                    "Split it into smaller batches."
+                ),
+            )
         state.referer = request.referer
 
         previously_downloaded_urls = history_store.was_previously_downloaded(valid_urls)
@@ -76,7 +91,13 @@ def build_queue_router(
         # and queue valid_urls as-is, keeping previously_downloaded_urls for the badge flag.
 
         resolved_folder = resolve_output_folder(request.output_folder, request.subfolder)
-        Path(resolved_folder).mkdir(parents=True, exist_ok=True)
+        try:
+            Path(resolved_folder).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Couldn't create the output folder: {exc.strerror or exc}",
+            ) from exc
 
         batch_id = uuid.uuid4().hex if valid_urls else None
         entries = queue_manager.add_entries(
@@ -106,10 +127,19 @@ def build_queue_router(
             "duplicate_urls": [],
         }
 
+    # Entries are auto-removed from the queue a few seconds after finishing
+    # (see DownloadOrchestrator._remove_from_queue_after_delay), so a
+    # pause/retry/resume click racing that timer -- or a stale/duplicate
+    # click, or a leftover browser tab -- can reference an entry_id that's
+    # already gone. queue_manager.get()/to_dict() raise a bare KeyError for
+    # that, which without this would surface as an unhandled 500.
     @router.post("/queue/{entry_id}/retry", status_code=202)
     async def retry_entry(entry_id: str, request: RetryRequest) -> dict:
-        entry = queue_manager.get(entry_id)
-        queue_manager.reset_for_retry(entry_id)
+        try:
+            entry = queue_manager.get(entry_id)
+            queue_manager.reset_for_retry(entry_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
         referer = request.referer or state.referer
         track_task(
             asyncio.create_task(
@@ -121,11 +151,17 @@ def build_queue_router(
     @router.post("/queue/{entry_id}/pause", status_code=202)
     def pause_entry(entry_id: str) -> dict:
         orchestrator.request_pause(entry_id)
-        return {"entry": queue_manager.to_dict(entry_id)}
+        try:
+            return {"entry": queue_manager.to_dict(entry_id)}
+        except KeyError:
+            raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
 
     @router.post("/queue/{entry_id}/resume", status_code=202)
     async def resume_entry(entry_id: str, request: RetryRequest) -> dict:
-        entry = queue_manager.get(entry_id)
+        try:
+            entry = queue_manager.get(entry_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
         referer = request.referer or state.referer
         track_task(
             asyncio.create_task(

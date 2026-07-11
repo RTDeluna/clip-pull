@@ -81,6 +81,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    except Exception:
+        # Any other transport-level error (not a clean WebSocketDisconnect)
+        # still needs the connection removed from the broadcast list -- left
+        # unhandled, broadcast()'s own dead-connection cleanup would
+        # eventually self-heal this, but only on the next message sent.
+        pass
+    finally:
         connection_manager.disconnect(websocket)
 
 

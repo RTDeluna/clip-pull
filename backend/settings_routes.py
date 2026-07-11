@@ -1,10 +1,13 @@
+import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from downloader import check_aria2c_available
 from settings_store import SettingsStore
+
+DB_BUSY_MESSAGE = "The app's local database is busy — try again in a moment."
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -20,13 +23,19 @@ def build_settings_router(settings_store: SettingsStore) -> APIRouter:
 
     @router.get("/settings")
     def get_settings() -> dict:
-        settings = settings_store.get()
+        try:
+            settings = settings_store.get()
+        except sqlite3.OperationalError:
+            raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
         settings["aria2c_detected"] = check_aria2c_available()
         return settings
 
     @router.patch("/settings")
     def patch_settings(request: SettingsUpdateRequest) -> dict:
-        updated = settings_store.update(**request.model_dump())
+        try:
+            updated = settings_store.update(**request.model_dump())
+        except sqlite3.OperationalError:
+            raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
         updated["aria2c_detected"] = check_aria2c_available()
         return updated
 

@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 from typing import Union
 
@@ -17,9 +18,16 @@ class SettingsStore:
         self._conn = get_connection(db_path)
         self._conn.execute("INSERT OR IGNORE INTO settings (id) VALUES (1)")
         self._conn.commit()
+        # Same reasoning as HistoryStore._lock: this connection is read from
+        # settings_routes' sync handlers (threadpool) and from orchestrator
+        # callbacks (get_max_concurrent etc., called per-download from async
+        # tasks) -- serialize explicitly rather than relying on undocumented
+        # sqlite3 thread-safety for concurrent access to one connection.
+        self._lock = threading.Lock()
 
     def get(self) -> dict:
-        row = self._conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
         return {
             "max_concurrent_downloads": row["max_concurrent_downloads"],
             "concurrent_fragment_downloads": row["concurrent_fragment_downloads"],
@@ -42,6 +50,7 @@ class SettingsStore:
             int(value) if isinstance(value, bool) else value
             for value in fields_to_update.values()
         ]
-        self._conn.execute(f"UPDATE settings SET {set_clause} WHERE id = 1", values)
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(f"UPDATE settings SET {set_clause} WHERE id = 1", values)
+            self._conn.commit()
         return self.get()

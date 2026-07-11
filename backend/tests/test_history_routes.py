@@ -1,3 +1,6 @@
+import sqlite3
+from unittest.mock import patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -92,3 +95,27 @@ def test_clear_history_removes_matching_entries():
     remaining = client.get("/history").json()["entries"]
     assert len(remaining) == 1
     assert remaining[0]["status"] == "done"
+
+
+def test_get_history_returns_503_with_friendly_message_when_db_is_locked():
+    client, store = _make_client()
+    with patch.object(store, "search", side_effect=sqlite3.OperationalError("database is locked")):
+        response = client.get("/history")
+    assert response.status_code == 503
+    assert "busy" in response.json()["detail"].lower()
+
+
+def test_delete_history_entry_returns_503_with_friendly_message_when_db_is_locked():
+    client, store = _make_client()
+    with patch.object(store, "delete", side_effect=sqlite3.OperationalError("database is locked")):
+        response = client.delete("/history/1")
+    assert response.status_code == 503
+    assert "busy" in response.json()["detail"].lower()
+
+
+def test_clear_history_returns_503_with_friendly_message_when_db_is_locked():
+    client, store = _make_client()
+    with patch.object(store, "clear", side_effect=sqlite3.OperationalError("database is locked")):
+        response = client.delete("/history")
+    assert response.status_code == 503
+    assert "busy" in response.json()["detail"].lower()

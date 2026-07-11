@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -5,7 +7,7 @@ from queue_manager import QueueManager
 from downloader import DownloadOrchestrator
 from history_store import HistoryStore
 from settings_store import SettingsStore
-from queue_routes import build_queue_router, AppState
+from queue_routes import MAX_URLS_PER_BATCH, build_queue_router, AppState
 
 
 async def fake_download_all(entry_ids, output_folder, referer=None):
@@ -299,6 +301,67 @@ def test_post_queue_flat_folder_when_subfolder_omitted(tmp_path):
     )
     entries = response.json()["entries"]
     assert entries[0]["output_folder"] == str(base_folder)
+
+
+def test_retry_entry_returns_404_for_unknown_entry_id():
+    client, _, _, _, _ = _make_client()
+    response = client.post("/queue/does-not-exist/retry", json={})
+    assert response.status_code == 404
+
+
+def test_pause_entry_returns_404_for_unknown_entry_id():
+    client, _, _, _, _ = _make_client()
+    response = client.post("/queue/does-not-exist/pause")
+    assert response.status_code == 404
+
+
+def test_resume_entry_returns_404_for_unknown_entry_id():
+    client, _, _, _, _ = _make_client()
+    response = client.post("/queue/does-not-exist/resume", json={})
+    assert response.status_code == 404
+
+
+def test_retry_entry_still_works_normally_for_a_real_entry_id():
+    # Guards against the 404 handling above accidentally swallowing the
+    # success path too.
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/444", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.set_error(entry_id, "some error")
+    response = client.post(f"/queue/{entry_id}/retry", json={})
+    assert response.status_code == 202
+
+
+def test_post_queue_rejects_batches_over_the_max_size():
+    client, _, _, _, _ = _make_client()
+    urls_text = "\n".join(f"https://vimeo.com/{i}" for i in range(MAX_URLS_PER_BATCH + 1))
+    response = client.post(
+        "/queue", json={"urls_text": urls_text, "output_folder": "C:/downloads"}
+    )
+    assert response.status_code == 400
+    assert str(MAX_URLS_PER_BATCH) in response.json()["detail"]
+
+
+def test_post_queue_accepts_a_batch_at_exactly_the_max_size():
+    client, _, _, _, _ = _make_client()
+    urls_text = "\n".join(f"https://vimeo.com/{i}" for i in range(MAX_URLS_PER_BATCH))
+    response = client.post(
+        "/queue", json={"urls_text": urls_text, "output_folder": "C:/downloads"}
+    )
+    assert response.status_code == 202
+    assert len(response.json()["entries"]) == MAX_URLS_PER_BATCH
+
+
+def test_post_queue_returns_400_with_friendly_message_when_folder_creation_fails():
+    client, _, _, _, _ = _make_client()
+    with patch("queue_routes.Path.mkdir", side_effect=OSError("disk full")):
+        response = client.post(
+            "/queue", json={"urls_text": "https://vimeo.com/1", "output_folder": "C:/downloads"}
+        )
+    assert response.status_code == 400
+    assert "output folder" in response.json()["detail"].lower()
 
 
 def test_retry_entry_uses_entrys_own_output_folder_not_global_state():
