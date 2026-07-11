@@ -964,6 +964,19 @@ input[type="checkbox"] {
   border-bottom: 1px solid var(--glass-border);
 }
 
+.connection-banner {
+  position: sticky;
+  top: 0;
+  z-index: 11;
+  padding: 8px 24px;
+  text-align: center;
+  background: var(--error-bg);
+  border-bottom: 1px solid var(--error-border);
+  color: var(--error);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .tabs__group {
   position: relative;
   display: flex;

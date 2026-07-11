@@ -258,7 +258,19 @@ searchInput.addEventListener("input", () => {
 });
 statusFilter.addEventListener("change", loadHistory);
 
-loadHistory();
+// The packaged backend is a PyInstaller onefile executable whose cold-start
+// can outlast main.js's waitForBackend budget (see the matching comment in
+// renderer.js's prefillDefaultOutputFolder) -- a single failed attempt right
+// as this script loads would otherwise leave History looking like "no
+// history yet" instead of "failed to load," for the rest of the session.
+async function loadHistoryOnStartup(retriesLeft = 10) {
+  const ok = await loadHistory();
+  if (!ok && retriesLeft > 0) {
+    setTimeout(() => loadHistoryOnStartup(retriesLeft - 1), 500);
+  }
+}
+
+loadHistoryOnStartup();
 
 // Every finished download is pushed here the instant it's recorded — the
 // History tab always reflects it live, whether or not it's the active tab.

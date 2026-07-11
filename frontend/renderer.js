@@ -15,6 +15,7 @@ const startBtn = document.getElementById("start-btn");
 const queueList = document.getElementById("queue-list");
 const queueSummary = document.getElementById("queue-summary");
 const queueRefreshBtn = document.getElementById("queue-refresh-btn");
+const connectionBanner = document.getElementById("connection-banner");
 
 const rows = new Map();
 const summaryCounts = { done: 0, error: 0 };
@@ -515,28 +516,37 @@ startBtn.addEventListener("click", async () => {
   }
 });
 
-connectQueueSocket((event) => {
-  if (event.type === "sync") {
-    event.entries.forEach((entry) => renderRow(entry, { announceCompletion: false }));
-  } else if (event.type === "update_batch") {
-    event.entries.forEach(renderRow);
-  } else if (event.type === "removed") {
-    removeRow(event.entry_id);
-  } else if (event.type === "batch_complete") {
-    const { done, error } = event.summary;
-    showToast(
-      `Batch complete — ${done} done${error ? `, ${error} failed` : ""}`,
-      error ? "warning" : "success"
-    );
-    if (window.Notification && Notification.permission === "granted") {
-      new Notification("Batch complete", {
-        body: `${done} done, ${error} failed`,
-      });
-    } else if (window.Notification && Notification.permission !== "denied") {
-      Notification.requestPermission();
+connectQueueSocket(
+  (event) => {
+    if (event.type === "sync") {
+      event.entries.forEach((entry) => renderRow(entry, { announceCompletion: false }));
+    } else if (event.type === "update_batch") {
+      event.entries.forEach(renderRow);
+    } else if (event.type === "removed") {
+      removeRow(event.entry_id);
+    } else if (event.type === "batch_complete") {
+      const { done, error } = event.summary;
+      showToast(
+        `Batch complete — ${done} done${error ? `, ${error} failed` : ""}`,
+        error ? "warning" : "success"
+      );
+      if (window.Notification && Notification.permission === "granted") {
+        new Notification("Batch complete", {
+          body: `${done} done, ${error} failed`,
+        });
+      } else if (window.Notification && Notification.permission !== "denied") {
+        Notification.requestPermission();
+      }
     }
+  },
+  (status) => {
+    // Without this, a WebSocket drop mid-download (network blip, backend
+    // hiccup) left the Queue view silently frozen with zero indication
+    // anything was wrong — the reconnect itself already happens
+    // automatically (see ws-client.js), this just makes it visible.
+    connectionBanner.hidden = status !== "disconnected";
   }
-});
+);
 
 // The packaged backend is a PyInstaller onefile executable — it self-extracts
 // to a temp directory on every launch, which (especially on first run, with
