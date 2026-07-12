@@ -147,6 +147,76 @@ def test_record_without_update_id_always_inserts_a_new_row():
     assert len(store.search()) == 2
 
 
+def test_get_returns_the_matching_row():
+    store = HistoryStore()
+    created = _record(store)
+    fetched = store.get(created["id"])
+    assert fetched == created
+
+
+def test_get_returns_none_for_unknown_id():
+    store = HistoryStore()
+    assert store.get(999) is None
+
+
+def test_new_history_rows_default_to_no_transcript():
+    store = HistoryStore()
+    row = _record(store)
+    assert row["transcript_status"] == "none"
+    assert row["transcript"] is None
+    assert row["summary"] is None
+
+
+def test_update_transcript_sets_fields_and_returns_updated_row():
+    store = HistoryStore()
+    created = _record(store)
+    updated = store.update_transcript(
+        created["id"], status="done", transcript="Hello world.", summary="A greeting."
+    )
+    assert updated["transcript_status"] == "done"
+    assert updated["transcript"] == "Hello world."
+    assert updated["summary"] == "A greeting."
+    assert updated["transcribed_at"] is not None
+
+
+def test_update_transcript_records_error_state():
+    store = HistoryStore()
+    created = _record(store)
+    updated = store.update_transcript(created["id"], status="error", error="Invalid API key")
+    assert updated["transcript_status"] == "error"
+    assert updated["transcript_error"] == "Invalid API key"
+    assert updated["transcript"] is None
+
+
+def test_update_transcript_returns_none_for_unknown_id():
+    store = HistoryStore()
+    assert store.update_transcript(999, status="done") is None
+
+
+def test_reset_stuck_transcriptions_resets_running_rows_to_error():
+    store = HistoryStore()
+    created = _record(store)
+    store.update_transcript(created["id"], status="running")
+
+    count = store.reset_stuck_transcriptions()
+
+    assert count == 1
+    updated = store.get(created["id"])
+    assert updated["transcript_status"] == "error"
+    assert "interrupted" in updated["transcript_error"]
+
+
+def test_reset_stuck_transcriptions_leaves_other_statuses_alone():
+    store = HistoryStore()
+    created = _record(store)
+    store.update_transcript(created["id"], status="done", transcript="hi")
+
+    count = store.reset_stuck_transcriptions()
+
+    assert count == 0
+    assert store.get(created["id"])["transcript_status"] == "done"
+
+
 def test_history_persists_across_store_instances_pointing_at_same_file(tmp_path):
     db_path = tmp_path / "history.db"
     store1 = HistoryStore(db_path)

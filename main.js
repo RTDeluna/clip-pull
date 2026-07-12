@@ -242,6 +242,27 @@ ipcMain.handle("open-chrome-extensions", async () => {
   }
 });
 
+// Settings links out to where to get API keys -- allow-listed rather than
+// accepting any renderer-supplied URL, since a compromised/buggy renderer
+// otherwise gets an arbitrary-URL-open primitive via shell.openExternal.
+const ALLOWED_EXTERNAL_URLS = new Set([
+  "https://platform.openai.com/api-keys",
+  "https://console.anthropic.com/settings/keys",
+]);
+
+ipcMain.handle("open-external", async (_, url) => {
+  if (!ALLOWED_EXTERNAL_URLS.has(url)) {
+    console.error("Blocked attempt to open a non-allow-listed external URL:", url);
+    return { ok: false, error: "not_allowed" };
+  }
+  try {
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
+
 function findExtensionZip() {
   try {
     return fs.readdirSync(EXTENSION_DIR).find((f) => f.endsWith(".zip")) || null;

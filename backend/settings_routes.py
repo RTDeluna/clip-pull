@@ -16,6 +16,8 @@ class SettingsUpdateRequest(BaseModel):
     aria2c_enabled: Optional[bool] = None
     skip_duplicates: Optional[bool] = None
     default_output_folder: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
 
 
 def build_settings_router(settings_store: SettingsStore) -> APIRouter:

@@ -213,6 +213,20 @@
           <button id="setting-browse-btn" class="btn btn--ghost" type="button">Browse…</button>
         </div>
 
+        <label class="field-label" for="setting-openai-api-key">OpenAI API key</label>
+        <input id="setting-openai-api-key" class="text-input" type="password" autocomplete="off" placeholder="sk-…" />
+        <p class="field-hint">
+          Powers transcription (Whisper). Get a key at
+          <a href="#" data-external-link="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a>.
+        </p>
+
+        <label class="field-label" for="setting-anthropic-api-key">Anthropic API key</label>
+        <input id="setting-anthropic-api-key" class="text-input" type="password" autocomplete="off" placeholder="sk-ant-…" />
+        <p class="field-hint">
+          Powers summarization (Claude). Get a key at
+          <a href="#" data-external-link="https://console.anthropic.com/settings/keys">console.anthropic.com/settings/keys</a>.
+        </p>
+
         <button id="settings-save-btn" class="btn btn--primary" type="button">Save Settings</button>
       </div>
     </div>

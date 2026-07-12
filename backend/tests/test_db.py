@@ -41,3 +41,30 @@ def test_run_migrations_idempotent_when_called_twice():
     table_names = [row["name"] for row in tables]
     assert table_names.count("history") == 1
     assert table_names.count("settings") == 1
+
+
+def _column_names(conn, table):
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def test_history_table_has_transcript_columns():
+    conn = get_connection(":memory:")
+    columns = _column_names(conn, "history")
+    assert {"transcript", "transcript_status", "transcript_error", "summary", "transcribed_at"} <= columns
+
+
+def test_history_transcript_status_defaults_to_none():
+    conn = get_connection(":memory:")
+    conn.execute(
+        "INSERT INTO history (url, status, finished_at) VALUES (?, 'done', datetime('now'))",
+        ("https://vimeo.com/1",),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM history").fetchone()
+    assert row["transcript_status"] == "none"
+
+
+def test_settings_table_has_api_key_columns():
+    conn = get_connection(":memory:")
+    columns = _column_names(conn, "settings")
+    assert {"openai_api_key", "anthropic_api_key"} <= columns

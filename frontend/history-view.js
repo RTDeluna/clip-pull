@@ -17,6 +17,11 @@ const X_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strok
 const VIDEO_ICON = `<svg class="history-row__icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M10 9.5v5l4.5-2.5z" fill="currentColor" stroke="none"></path></svg>`;
 const ERROR_ICON = `<svg class="history-row__icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5"></path><path d="M12 16h.01"></path></svg>`;
 
+// Every rendered History row, keyed by its id -- lets transcript_update WS
+// events patch one row's live status/content in place instead of forcing a
+// full loadHistory() refetch on every chunk-transcription progress tick.
+const transcriptRows = new Map();
+
 function removeRowAnimated(row) {
   row.classList.add("queue-row--leaving");
   row.addEventListener(
@@ -71,12 +76,12 @@ function renderDateHeading(label) {
   return li;
 }
 
-async function copyLink(url) {
+async function copyToClipboard(text, label = "Link") {
   try {
-    await navigator.clipboard.writeText(url);
-    showToast("Link copied", "success");
+    await navigator.clipboard.writeText(text);
+    showToast(`${label} copied`, "success");
   } catch {
-    showToast("Failed to copy link", "error");
+    showToast(`Failed to copy ${label.toLowerCase()}`, "error");
   }
 }
 
@@ -135,6 +140,81 @@ async function retryFromHistory(entry, button) {
   }
 }
 
+async function transcribeEntry(entry, button) {
+  const confirmed = confirm(
+    "Transcription uses the OpenAI and Anthropic API keys configured in " +
+      "Settings and is billed per use on your account. Long videos may " +
+      "take several minutes. Continue?"
+  );
+  if (!confirmed) return;
+
+  button.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE}/history/${entry.id}/transcribe`, { method: "POST" });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      showToast(body?.detail || "Failed to start transcription.", "error");
+      button.disabled = false;
+      return;
+    }
+    const body = await response.json();
+    const tracked = transcriptRows.get(entry.id);
+    if (tracked) {
+      tracked.entry = body.entry;
+      applyTranscriptState(tracked.row, tracked.entry);
+    }
+  } catch (error) {
+    showToast("Failed to reach the backend: " + error.message, "error");
+    button.disabled = false;
+  }
+}
+
+function canTranscribe(entry) {
+  return (
+    entry.status === "done" &&
+    Boolean(entry.output_path) &&
+    (!entry.transcript_status || entry.transcript_status === "none" || entry.transcript_status === "error")
+  );
+}
+
+function setTranscriptStatusText(row, text) {
+  const statusEl = row.querySelector(".history-row__transcript-status");
+  statusEl.textContent = text || "";
+  statusEl.hidden = !text;
+}
+
+function applyTranscriptState(row, entry) {
+  const transcribeBtn = row.querySelector(".transcribe-btn");
+  const viewBtn = row.querySelector(".view-transcript-btn");
+  const panel = row.querySelector(".history-row__transcript-panel");
+  const errorEl = row.querySelector(".history-row__transcript-error");
+  const status = entry.transcript_status || "none";
+
+  transcribeBtn.hidden = !canTranscribe(entry);
+  viewBtn.hidden = status !== "done";
+  errorEl.hidden = status !== "error";
+  errorEl.textContent = status === "error" ? entry.transcript_error || "Transcription failed" : "";
+
+  setTranscriptStatusText(row, status === "running" ? "Transcribing…" : "");
+
+  if (status === "done") {
+    const summaryEl = row.querySelector(".history-row__transcript-summary");
+    const transcriptEl = row.querySelector(".history-row__transcript-text");
+    if (entry.summary) {
+      summaryEl.textContent = entry.summary;
+      summaryEl.hidden = false;
+      row.querySelector(".history-row__transcript-no-summary").hidden = true;
+    } else {
+      summaryEl.hidden = true;
+      row.querySelector(".history-row__transcript-no-summary").hidden = false;
+    }
+    transcriptEl.textContent = entry.transcript || "";
+  } else {
+    panel.hidden = true;
+    viewBtn.textContent = "View transcript";
+  }
+}
+
 function renderHistoryRow(entry) {
   const isError = entry.status === "error";
 
@@ -156,7 +236,31 @@ function renderHistoryRow(entry) {
       </div>
     </div>
     <button class="retry-btn" type="button" hidden>Retry</button>
+    <button class="transcribe-btn" type="button" hidden>Transcribe</button>
+    <div class="history-row__transcript-error" hidden></div>
+    <div class="history-row__transcript-status" hidden></div>
+    <button class="view-transcript-btn" type="button" hidden>View transcript</button>
+    <div class="history-row__transcript-panel" hidden>
+      <div class="history-row__transcript-section">
+        <div class="history-row__transcript-section-header">
+          <span>Summary</span>
+          <button class="history-icon-btn copy-summary-btn" type="button" aria-label="Copy summary" title="Copy summary">${LINK_ICON}</button>
+        </div>
+        <p class="history-row__transcript-no-summary" hidden>No summary — add an Anthropic API key in Settings to enable summaries.</p>
+        <p class="history-row__transcript-summary"></p>
+      </div>
+      <div class="history-row__transcript-section">
+        <div class="history-row__transcript-section-header">
+          <span>Transcript</span>
+          <button class="history-icon-btn copy-transcript-btn" type="button" aria-label="Copy transcript" title="Copy transcript">${LINK_ICON}</button>
+        </div>
+        <pre class="history-row__transcript-text"></pre>
+      </div>
+    </div>
   `;
+
+  const tracked = { row, entry };
+  transcriptRows.set(entry.id, tracked);
 
   const titleEl = row.querySelector(".history-row__title");
   titleEl.textContent = entry.title || entry.url;
@@ -183,7 +287,7 @@ function renderHistoryRow(entry) {
     retryBtn.addEventListener("click", () => retryFromHistory(entry, retryBtn));
   }
 
-  row.querySelector(".history-copy-btn").addEventListener("click", () => copyLink(entry.url));
+  row.querySelector(".history-copy-btn").addEventListener("click", () => copyToClipboard(entry.url, "Link"));
 
   const revealBtn = row.querySelector(".history-reveal-btn");
   revealBtn.disabled = !entry.output_path;
@@ -192,6 +296,25 @@ function renderHistoryRow(entry) {
   });
 
   row.querySelector(".history-delete-btn").addEventListener("click", () => deleteEntry(entry.id, row));
+
+  const transcribeBtn = row.querySelector(".transcribe-btn");
+  transcribeBtn.addEventListener("click", () => transcribeEntry(tracked.entry, transcribeBtn));
+
+  const viewBtn = row.querySelector(".view-transcript-btn");
+  const panel = row.querySelector(".history-row__transcript-panel");
+  viewBtn.addEventListener("click", () => {
+    panel.hidden = !panel.hidden;
+    viewBtn.textContent = panel.hidden ? "View transcript" : "Hide transcript";
+  });
+
+  row.querySelector(".copy-summary-btn").addEventListener("click", () => {
+    copyToClipboard(row.querySelector(".history-row__transcript-summary").textContent, "Summary");
+  });
+  row.querySelector(".copy-transcript-btn").addEventListener("click", () => {
+    copyToClipboard(row.querySelector(".history-row__transcript-text").textContent, "Transcript");
+  });
+
+  applyTranscriptState(row, entry);
 
   return row;
 }
@@ -205,6 +328,7 @@ async function loadHistory() {
     if (!response.ok) return false;
     const body = await response.json();
     historyList.innerHTML = "";
+    transcriptRows.clear();
     let lastGroup = null;
     body.entries.forEach((entry) => {
       const group = dateGroupLabel(parseFinishedDate(entry.finished_at));
@@ -280,6 +404,20 @@ loadHistoryOnStartup();
 // History tab always reflects it live, whether or not it's the active tab.
 let historyPushTimer;
 connectQueueSocket((event) => {
+  if (event.type === "transcript_update") {
+    const tracked = transcriptRows.get(event.history_id);
+    if (!tracked) return; // row isn't currently rendered (different filter/search)
+    if (event.entry) {
+      // Terminal state (running-start/done/error) -- carries the full row,
+      // so patch it directly instead of waiting on a full refetch.
+      tracked.entry = event.entry;
+      applyTranscriptState(tracked.row, tracked.entry);
+    }
+    if (event.status === "running") {
+      setTranscriptStatusText(tracked.row, event.detail || "Transcribing…");
+    }
+    return;
+  }
   if (event.type !== "history_added") return;
   // Briefly coalesces bursts (e.g. a batch finishing within milliseconds of
   // each other) into a single refetch instead of one per entry.

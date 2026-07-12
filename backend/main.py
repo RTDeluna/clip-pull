@@ -15,6 +15,8 @@ from queue_manager import QueueManager
 from queue_routes import AppState, build_queue_router
 from settings_routes import build_settings_router
 from settings_store import SettingsStore
+from transcription import TranscriptionOrchestrator
+from transcription_routes import build_transcription_router
 from ws_manager import ConnectionManager, QueueBroadcaster
 
 DB_PATH = os.environ.get(
@@ -78,11 +80,20 @@ orchestrator = DownloadOrchestrator(
 
 state = AppState()
 
+transcription_orchestrator = TranscriptionOrchestrator(
+    history_store,
+    settings_store,
+    broadcast=lambda message: track_task(
+        asyncio.create_task(connection_manager.broadcast(message))
+    ),
+)
+
 app.include_router(
     build_queue_router(queue_manager, orchestrator, history_store, settings_store, state)
 )
 app.include_router(build_history_router(history_store))
 app.include_router(build_settings_router(settings_store))
+app.include_router(build_transcription_router(history_store, transcription_orchestrator))
 
 
 @app.get("/health")
@@ -116,6 +127,13 @@ if __name__ == "__main__":
         logger.warning(
             "ffmpeg not found on PATH. Downloads will use a single "
             "pre-muxed format instead of the highest available quality."
+        )
+
+    reset_count = history_store.reset_stuck_transcriptions()
+    if reset_count:
+        logger.warning(
+            "Reset %d transcription(s) left stuck on 'running' from a previous session.",
+            reset_count,
         )
 
     uvicorn.run(app, host="127.0.0.1", port=8934)

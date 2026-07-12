@@ -10,6 +10,8 @@ const aria2cDetectedNote = document.getElementById("aria2c-detected-note");
 const skipDuplicatesInput = document.getElementById("setting-skip-duplicates");
 const defaultFolderInput = document.getElementById("setting-default-folder");
 const browseBtn = document.getElementById("setting-browse-btn");
+const openaiApiKeyInput = document.getElementById("setting-openai-api-key");
+const anthropicApiKeyInput = document.getElementById("setting-anthropic-api-key");
 const saveBtn = document.getElementById("settings-save-btn");
 
 function applySettings(settings) {
@@ -21,7 +23,16 @@ function applySettings(settings) {
     : "(not detected on PATH)";
   skipDuplicatesInput.checked = settings.skip_duplicates;
   defaultFolderInput.value = settings.default_output_folder || "";
+  openaiApiKeyInput.value = settings.openai_api_key || "";
+  anthropicApiKeyInput.value = settings.anthropic_api_key || "";
 }
+
+document.querySelectorAll("[data-external-link]").forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    window.api.openExternal(link.dataset.externalLink);
+  });
+});
 
 // See the matching comment in renderer.js's prefillDefaultOutputFolder —
 // the packaged PyInstaller backend's cold-start can outlast main.js's
@@ -60,6 +71,8 @@ saveBtn.addEventListener("click", async () => {
         aria2c_enabled: aria2cEnabledInput.checked,
         skip_duplicates: skipDuplicatesInput.checked,
         default_output_folder: defaultFolderInput.value || null,
+        openai_api_key: openaiApiKeyInput.value || null,
+        anthropic_api_key: anthropicApiKeyInput.value || null,
       }),
     });
     if (!response.ok) {

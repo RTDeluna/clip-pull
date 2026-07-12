@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("api", {
   getExtensionPackageInfo: () => ipcRenderer.invoke("get-extension-package-info"),
   saveExtensionPackage: () => ipcRenderer.invoke("save-extension-package"),
   openChromeExtensions: () => ipcRenderer.invoke("open-chrome-extensions"),
+  openExternal: (url) => ipcRenderer.invoke("open-external", url),
   backendPort: 8934,
 });

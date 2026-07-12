@@ -78,6 +78,61 @@ class HistoryStore:
             ).fetchone()
             return dict(row)
 
+    def get(self, entry_id: int) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM history WHERE id = ?", (entry_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_transcript(
+        self,
+        entry_id: int,
+        *,
+        status: str,
+        transcript: Optional[str] = None,
+        summary: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Updates an existing row's transcription state in place -- always
+        targets a row a normal download completion already created, so
+        unlike record() there's no insert-fallback. Returns None if the row
+        is gone (e.g. deleted from History mid-job)."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE history
+                SET transcript_status = ?, transcript = ?, summary = ?,
+                    transcript_error = ?, transcribed_at = datetime('now')
+                WHERE id = ?
+                """,
+                (status, transcript, summary, error, entry_id),
+            )
+            self._conn.commit()
+            if cursor.rowcount == 0:
+                return None
+            row = self._conn.execute(
+                "SELECT * FROM history WHERE id = ?", (entry_id,)
+            ).fetchone()
+            return dict(row)
+
+    def reset_stuck_transcriptions(self) -> int:
+        """A transcription job only lives in memory while running, so an app
+        quit mid-job leaves its row stuck on "running" forever with nothing
+        left to ever resume it. Called once at startup to sweep those back
+        to a retryable error state. Returns how many rows were reset."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE history
+                SET transcript_status = 'error',
+                    transcript_error = 'Transcription was interrupted — try again.'
+                WHERE transcript_status = 'running'
+                """
+            )
+            self._conn.commit()
+            return cursor.rowcount
+
     def search(
         self,
         query: Optional[str] = None,

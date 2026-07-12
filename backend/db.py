@@ -31,6 +31,17 @@ MIGRATIONS = [
           default_output_folder TEXT
         );
     """),
+    (3, """
+        ALTER TABLE history ADD COLUMN transcript TEXT;
+        ALTER TABLE history ADD COLUMN transcript_status TEXT NOT NULL DEFAULT 'none';
+        ALTER TABLE history ADD COLUMN transcript_error TEXT;
+        ALTER TABLE history ADD COLUMN summary TEXT;
+        ALTER TABLE history ADD COLUMN transcribed_at TEXT;
+    """),
+    (4, """
+        ALTER TABLE settings ADD COLUMN openai_api_key TEXT;
+        ALTER TABLE settings ADD COLUMN anthropic_api_key TEXT;
+    """),
 ]
 
 
