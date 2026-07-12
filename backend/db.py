@@ -48,6 +48,11 @@ MIGRATIONS = [
     (6, """
         ALTER TABLE settings RENAME COLUMN openrouter_api_key TO gemini_api_key;
     """),
+    (7, """
+        ALTER TABLE history ADD COLUMN summary_status TEXT NOT NULL DEFAULT 'none';
+        ALTER TABLE history ADD COLUMN summary_error TEXT;
+        ALTER TABLE history ADD COLUMN summarized_at TEXT;
+    """),
 ]
 
 

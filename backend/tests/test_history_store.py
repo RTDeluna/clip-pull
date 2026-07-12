@@ -170,13 +170,13 @@ def test_new_history_rows_default_to_no_transcript():
 def test_update_transcript_sets_fields_and_returns_updated_row():
     store = HistoryStore()
     created = _record(store)
-    updated = store.update_transcript(
-        created["id"], status="done", transcript="Hello world.", summary="A greeting."
-    )
+    updated = store.update_transcript(created["id"], status="done", transcript="Hello world.")
     assert updated["transcript_status"] == "done"
     assert updated["transcript"] == "Hello world."
-    assert updated["summary"] == "A greeting."
     assert updated["transcribed_at"] is not None
+    # Transcribing never touches the independent summary state.
+    assert updated["summary_status"] == "none"
+    assert updated["summary"] is None
 
 
 def test_update_transcript_records_error_state():
@@ -193,7 +193,36 @@ def test_update_transcript_returns_none_for_unknown_id():
     assert store.update_transcript(999, status="done") is None
 
 
-def test_reset_stuck_transcriptions_resets_running_rows_to_error():
+def test_update_summary_sets_fields_independently_of_transcript_state():
+    store = HistoryStore()
+    created = _record(store)
+    store.update_transcript(created["id"], status="done", transcript="Hello world.")
+
+    updated = store.update_summary(created["id"], status="done", summary="A greeting.")
+
+    assert updated["summary_status"] == "done"
+    assert updated["summary"] == "A greeting."
+    assert updated["summarized_at"] is not None
+    # Summarizing never touches the already-set transcript state.
+    assert updated["transcript_status"] == "done"
+    assert updated["transcript"] == "Hello world."
+
+
+def test_update_summary_records_error_state():
+    store = HistoryStore()
+    created = _record(store)
+    updated = store.update_summary(created["id"], status="error", error="Invalid API key")
+    assert updated["summary_status"] == "error"
+    assert updated["summary_error"] == "Invalid API key"
+    assert updated["summary"] is None
+
+
+def test_update_summary_returns_none_for_unknown_id():
+    store = HistoryStore()
+    assert store.update_summary(999, status="done") is None
+
+
+def test_reset_stuck_transcriptions_resets_running_transcript_to_error():
     store = HistoryStore()
     created = _record(store)
     store.update_transcript(created["id"], status="running")
@@ -204,6 +233,35 @@ def test_reset_stuck_transcriptions_resets_running_rows_to_error():
     updated = store.get(created["id"])
     assert updated["transcript_status"] == "error"
     assert "interrupted" in updated["transcript_error"]
+
+
+def test_reset_stuck_transcriptions_resets_running_summary_to_error():
+    store = HistoryStore()
+    created = _record(store)
+    store.update_transcript(created["id"], status="done", transcript="hi")
+    store.update_summary(created["id"], status="running")
+
+    count = store.reset_stuck_transcriptions()
+
+    assert count == 1
+    updated = store.get(created["id"])
+    assert updated["transcript_status"] == "done"  # untouched
+    assert updated["summary_status"] == "error"
+    assert "interrupted" in updated["summary_error"]
+
+
+def test_reset_stuck_transcriptions_resets_both_independently_in_one_pass():
+    store = HistoryStore()
+    created = _record(store)
+    store.update_transcript(created["id"], status="running")
+    store.update_summary(created["id"], status="running")
+
+    count = store.reset_stuck_transcriptions()
+
+    assert count == 1  # one row touched, both columns reset
+    updated = store.get(created["id"])
+    assert updated["transcript_status"] == "error"
+    assert updated["summary_status"] == "error"
 
 
 def test_reset_stuck_transcriptions_leaves_other_statuses_alone():

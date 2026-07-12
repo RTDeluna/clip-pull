@@ -91,22 +91,54 @@ class HistoryStore:
         *,
         status: str,
         transcript: Optional[str] = None,
-        summary: Optional[str] = None,
         error: Optional[str] = None,
     ) -> Optional[dict]:
         """Updates an existing row's transcription state in place -- always
         targets a row a normal download completion already created, so
         unlike record() there's no insert-fallback. Returns None if the row
-        is gone (e.g. deleted from History mid-job)."""
+        is gone (e.g. deleted from History mid-job). Transcription and
+        summarization are independent jobs (see update_summary) -- this
+        never touches the summary columns."""
         with self._lock:
             cursor = self._conn.execute(
                 """
                 UPDATE history
-                SET transcript_status = ?, transcript = ?, summary = ?,
+                SET transcript_status = ?, transcript = ?,
                     transcript_error = ?, transcribed_at = datetime('now')
                 WHERE id = ?
                 """,
-                (status, transcript, summary, error, entry_id),
+                (status, transcript, error, entry_id),
+            )
+            self._conn.commit()
+            if cursor.rowcount == 0:
+                return None
+            row = self._conn.execute(
+                "SELECT * FROM history WHERE id = ?", (entry_id,)
+            ).fetchone()
+            return dict(row)
+
+    def update_summary(
+        self,
+        entry_id: int,
+        *,
+        status: str,
+        summary: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Updates an existing row's summarization state in place. Mirrors
+        update_transcript's shape exactly, but touches only the summary_*
+        columns -- summarizing is a separate, optional, user-triggered job
+        that runs after a transcript already exists, not a sub-step of
+        transcription."""
+        with self._lock:
+            cursor = self._conn.execute(
+                """
+                UPDATE history
+                SET summary_status = ?, summary = ?,
+                    summary_error = ?, summarized_at = datetime('now')
+                WHERE id = ?
+                """,
+                (status, summary, error, entry_id),
             )
             self._conn.commit()
             if cursor.rowcount == 0:
@@ -117,17 +149,24 @@ class HistoryStore:
             return dict(row)
 
     def reset_stuck_transcriptions(self) -> int:
-        """A transcription job only lives in memory while running, so an app
-        quit mid-job leaves its row stuck on "running" forever with nothing
-        left to ever resume it. Called once at startup to sweep those back
-        to a retryable error state. Returns how many rows were reset."""
+        """A transcription/summarization job only lives in memory while
+        running, so an app quit mid-job leaves its row stuck on "running"
+        forever with nothing left to ever resume it. Called once at startup
+        to sweep both independently back to a retryable error state.
+        Returns how many rows were touched (either column)."""
         with self._lock:
             cursor = self._conn.execute(
                 """
                 UPDATE history
-                SET transcript_status = 'error',
-                    transcript_error = 'Transcription was interrupted — try again.'
-                WHERE transcript_status = 'running'
+                SET transcript_status = CASE WHEN transcript_status = 'running'
+                        THEN 'error' ELSE transcript_status END,
+                    transcript_error = CASE WHEN transcript_status = 'running'
+                        THEN 'Transcription was interrupted — try again.' ELSE transcript_error END,
+                    summary_status = CASE WHEN summary_status = 'running'
+                        THEN 'error' ELSE summary_status END,
+                    summary_error = CASE WHEN summary_status = 'running'
+                        THEN 'Summarization was interrupted — try again.' ELSE summary_error END
+                WHERE transcript_status = 'running' OR summary_status = 'running'
                 """
             )
             self._conn.commit()

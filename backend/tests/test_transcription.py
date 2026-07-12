@@ -1,4 +1,5 @@
 import asyncio
+import threading
 
 import transcription as transcription_module
 from ai_clients import AIClientError
@@ -87,11 +88,19 @@ def _seed_done_entry(history_store, output_path):
     )
 
 
-def test_transcribe_entry_success_with_both_keys_persists_transcript_and_summary(tmp_path):
+def _seed_transcribed_entry(history_store, output_path="/tmp/video.mp4", transcript="[00:00:00] hello"):
+    entry = _seed_done_entry(history_store, output_path)
+    return history_store.update_transcript(entry["id"], status="done", transcript=transcript)
+
+
+# -- Transcription ----------------------------------------------------------
+
+
+def test_transcribe_entry_success_persists_transcript_only(tmp_path):
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(gemini_api_key="sk-gemini", anthropic_api_key="sk-anthropic")
+    settings_store.update(gemini_api_key="sk-gemini")
     entry = _seed_done_entry(history_store, video)
 
     orchestrator, broadcasts = _make_orchestrator(history_store=history_store, settings_store=settings_store)
@@ -100,29 +109,34 @@ def test_transcribe_entry_success_with_both_keys_persists_transcript_and_summary
     updated = history_store.get(entry["id"])
     assert updated["transcript_status"] == "done"
     assert "hello" in updated["transcript"]
-    assert updated["summary"] == "A short summary."
+    # transcribe_entry never touches the independent summary job/state.
+    assert updated["summary_status"] == "none"
+    assert updated["summary"] is None
+    assert all(b["type"] == "transcript_update" for b in broadcasts)
     assert broadcasts[0]["status"] == "running"
     assert broadcasts[-1]["status"] == "done"
+    assert broadcasts[-1]["percent"] == 100
     # The final broadcast carries the full row so the frontend can render
-    # the finished transcript/summary without a separate fetch.
+    # the finished transcript without a separate fetch.
     assert broadcasts[-1]["entry"]["transcript_status"] == "done"
-    assert broadcasts[-1]["entry"]["summary"] == "A short summary."
 
 
-def test_transcribe_entry_skips_summary_when_no_anthropic_key(tmp_path):
+def test_transcribe_entry_broadcasts_increasing_percent_across_chunks(tmp_path):
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
     settings_store.update(gemini_api_key="sk-gemini")
     entry = _seed_done_entry(history_store, video)
 
-    orchestrator, _ = _make_orchestrator(history_store=history_store, settings_store=settings_store)
+    orchestrator, broadcasts = _make_orchestrator(
+        history_store=history_store, settings_store=settings_store,
+        extract_fn=_fake_extract_fn_factory(2),
+    )
     asyncio.run(orchestrator.transcribe_entry(entry["id"]))
 
-    updated = history_store.get(entry["id"])
-    assert updated["transcript_status"] == "done"
-    assert updated["transcript"] is not None
-    assert updated["summary"] is None
+    percents = [b["percent"] for b in broadcasts if "percent" in b]
+    assert percents == sorted(percents)  # monotonically non-decreasing
+    assert percents[-1] == 100
 
 
 def test_transcribe_entry_fails_when_no_gemini_key(tmp_path):
@@ -265,18 +279,7 @@ def test_request_transcription_guards_against_double_start(tmp_path):
     settings_store.update(gemini_api_key="sk-gemini")
     entry = _seed_done_entry(history_store, video)
 
-    hold_event = asyncio.Event()
-
-    class SlowClient:
-        def __init__(self, api_key):
-            pass
-
-        def transcribe_chunk(self, chunk_path, response_format="verbose_json"):
-            return {"text": "hi", "duration": 1.0, "segments": [{"start": 0.0, "text": "hi"}]}
-
-    orchestrator, _ = _make_orchestrator(
-        history_store=history_store, settings_store=settings_store, gemini_client_cls=SlowClient
-    )
+    orchestrator, _ = _make_orchestrator(history_store=history_store, settings_store=settings_store)
 
     async def scenario():
         assert orchestrator.request_transcription(entry["id"]) is True
@@ -286,5 +289,161 @@ def test_request_transcription_guards_against_double_start(tmp_path):
         assert orchestrator.request_transcription(entry["id"]) is False
         await task
         assert orchestrator.request_transcription(entry["id"]) is True
+
+    asyncio.run(scenario())
+
+
+# -- Summarization ------------------------------------------------------
+
+
+def test_summarize_entry_success_persists_summary_only():
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    settings_store.update(anthropic_api_key="sk-anthropic")
+    entry = _seed_transcribed_entry(history_store)
+
+    orchestrator, broadcasts = _make_orchestrator(history_store=history_store, settings_store=settings_store)
+    asyncio.run(orchestrator.summarize_entry(entry["id"]))
+
+    updated = history_store.get(entry["id"])
+    assert updated["summary_status"] == "done"
+    assert updated["summary"] == "A short summary."
+    # summarize_entry never touches the already-set transcript state.
+    assert updated["transcript_status"] == "done"
+    assert all(b["type"] == "summary_update" for b in broadcasts)
+    assert broadcasts[-1]["status"] == "done"
+    assert broadcasts[-1]["entry"]["summary"] == "A short summary."
+
+
+def test_summarize_entry_fails_when_no_anthropic_key():
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    entry = _seed_transcribed_entry(history_store)
+
+    orchestrator, broadcasts = _make_orchestrator(history_store=history_store, settings_store=settings_store)
+    asyncio.run(orchestrator.summarize_entry(entry["id"]))
+
+    updated = history_store.get(entry["id"])
+    assert updated["summary_status"] == "error"
+    assert "Anthropic API key" in updated["summary_error"]
+    assert broadcasts[-1]["type"] == "summary_update"
+
+
+def test_summarize_entry_fails_when_not_yet_transcribed():
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    settings_store.update(anthropic_api_key="sk-anthropic")
+    entry = _seed_done_entry(history_store, "/tmp/video.mp4")  # transcript_status still "none"
+
+    orchestrator, _ = _make_orchestrator(history_store=history_store, settings_store=settings_store)
+    asyncio.run(orchestrator.summarize_entry(entry["id"]))
+
+    updated = history_store.get(entry["id"])
+    assert updated["summary_status"] == "error"
+    assert "transcribe it first" in updated["summary_error"]
+
+
+def test_summarize_entry_persists_friendly_error_on_api_failure():
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    settings_store.update(anthropic_api_key="bad-key")
+    entry = _seed_transcribed_entry(history_store)
+
+    class UnauthorizedClient:
+        def __init__(self, api_key):
+            pass
+
+        def summarize(self, transcript_text):
+            raise AIClientError("unauthorized", provider="anthropic", status_code=401)
+
+    orchestrator, _ = _make_orchestrator(
+        history_store=history_store, settings_store=settings_store, anthropic_client_cls=UnauthorizedClient
+    )
+    asyncio.run(orchestrator.summarize_entry(entry["id"]))
+
+    updated = history_store.get(entry["id"])
+    assert updated["summary_status"] == "error"
+    assert "rejected the API key" in updated["summary_error"]
+
+
+def test_summarize_entry_is_a_no_op_for_unknown_history_id():
+    orchestrator, broadcasts = _make_orchestrator()
+    asyncio.run(orchestrator.summarize_entry(999))
+    assert broadcasts == []
+
+
+class _BlockingAnthropicClient:
+    """Blocks inside summarize() (on a real thread, since run_in_executor
+    runs it off the event loop) until the test explicitly releases it --
+    makes "the job is still in flight" deterministic to observe, unlike
+    racing a trivial synchronous fake against a single event-loop tick."""
+
+    def __init__(self, api_key):
+        self.release = threading.Event()
+
+    def summarize(self, transcript_text):
+        self.release.wait(timeout=5)
+        return "A short summary."
+
+
+def test_request_summarization_guards_against_double_start():
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    settings_store.update(anthropic_api_key="sk-anthropic")
+    entry = _seed_transcribed_entry(history_store)
+
+    blocking_client_holder = {}
+
+    def blocking_client_cls(api_key):
+        client = _BlockingAnthropicClient(api_key)
+        blocking_client_holder["client"] = client
+        return client
+
+    orchestrator, _ = _make_orchestrator(
+        history_store=history_store, settings_store=settings_store,
+        anthropic_client_cls=blocking_client_cls,
+    )
+
+    async def scenario():
+        assert orchestrator.request_summarization(entry["id"]) is True
+        task = asyncio.ensure_future(orchestrator.summarize_entry(entry["id"]))
+        while "client" not in blocking_client_holder:
+            await asyncio.sleep(0)
+        assert orchestrator.request_summarization(entry["id"]) is False
+        blocking_client_holder["client"].release.set()
+        await task
+        assert orchestrator.request_summarization(entry["id"]) is True
+
+    asyncio.run(scenario())
+
+
+def test_transcription_and_summarization_guards_are_independent():
+    # A summarize job in flight must not block a transcribe request for
+    # the same entry, and vice versa -- they're tracked separately.
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    settings_store.update(gemini_api_key="sk-gemini", anthropic_api_key="sk-anthropic")
+    entry = _seed_transcribed_entry(history_store)
+
+    blocking_client_holder = {}
+
+    def blocking_client_cls(api_key):
+        client = _BlockingAnthropicClient(api_key)
+        blocking_client_holder["client"] = client
+        return client
+
+    orchestrator, _ = _make_orchestrator(
+        history_store=history_store, settings_store=settings_store,
+        anthropic_client_cls=blocking_client_cls,
+    )
+
+    async def scenario():
+        summarize_task = asyncio.ensure_future(orchestrator.summarize_entry(entry["id"]))
+        while "client" not in blocking_client_holder:
+            await asyncio.sleep(0)
+        assert orchestrator.request_summarization(entry["id"]) is False
+        assert orchestrator.request_transcription(entry["id"]) is True
+        blocking_client_holder["client"].release.set()
+        await summarize_task
 
     asyncio.run(scenario())

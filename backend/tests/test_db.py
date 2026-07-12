@@ -66,6 +66,25 @@ def test_history_transcript_status_defaults_to_none():
     assert row["transcript_status"] == "none"
 
 
+def test_history_table_has_independent_summary_columns():
+    conn = get_connection(":memory:")
+    columns = _column_names(conn, "history")
+    assert {"summary_status", "summary_error", "summarized_at"} <= columns
+
+
+def test_history_summary_status_defaults_to_none_independently_of_transcript_status():
+    conn = get_connection(":memory:")
+    conn.execute(
+        "INSERT INTO history (url, status, transcript_status, finished_at) "
+        "VALUES (?, 'done', 'done', datetime('now'))",
+        ("https://vimeo.com/1",),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM history").fetchone()
+    assert row["transcript_status"] == "done"
+    assert row["summary_status"] == "none"
+
+
 def test_settings_table_has_api_key_columns():
     conn = get_connection(":memory:")
     columns = _column_names(conn, "settings")

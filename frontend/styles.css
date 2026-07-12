@@ -735,9 +735,7 @@ input[type="checkbox"] {
 }
 
 .pause-btn,
-.resume-btn,
-.transcribe-btn,
-.view-transcript-btn {
+.resume-btn {
   position: relative;
   overflow: hidden;
   margin-top: 10px;
@@ -753,18 +751,14 @@ input[type="checkbox"] {
 }
 
 .pause-btn:hover,
-.resume-btn:hover,
-.transcribe-btn:hover,
-.view-transcript-btn:hover {
+.resume-btn:hover {
   background: var(--glass-bg-hover);
   border-color: var(--accent);
   color: var(--accent);
 }
 
 .pause-btn:active,
-.resume-btn:active,
-.transcribe-btn:active,
-.view-transcript-btn:active {
+.resume-btn:active {
   transform: translateY(1px) scale(0.96);
 }
 
@@ -963,75 +957,374 @@ input[type="checkbox"] {
   color: var(--error);
 }
 
-.history-row .retry-btn,
-.history-row .transcribe-btn,
-.history-row .view-transcript-btn {
+.history-row .retry-btn {
   margin-top: 10px;
   margin-left: 52px;
 }
 
-.history-row__transcript-error {
-  margin-top: 8px;
+/* -- Transcribe & Summarize feature ------------------------------------ */
+
+.transcript-feature {
+  margin-top: 10px;
   margin-left: 52px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-chip {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease), transform 140ms var(--ease);
+}
+
+.action-chip svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.action-chip:hover:not(:disabled) {
+  background: var(--glass-bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.action-chip:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+}
+
+.action-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-chip--accent {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  border-color: transparent;
+  color: #fff;
+}
+
+.action-chip--accent:hover:not(:disabled) {
+  color: #fff;
+  filter: brightness(1.08);
+  border-color: transparent;
+}
+
+.action-chip[hidden] {
+  display: none;
+}
+
+/* Progress ---------------------------------------------------------------- */
+
+.job-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.job-progress[hidden] {
+  display: none;
+}
+
+.job-progress__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.job-progress__icon {
+  display: flex;
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.job-progress__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.job-progress .progress-track {
+  background: var(--input-bg);
+  border-radius: var(--radius-pill);
+  height: 6px;
+  overflow: hidden;
+}
+
+.job-progress .progress-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  transition: width 220ms var(--ease);
+}
+
+.progress-track--indeterminate .progress-fill {
+  width: 40% !important;
+  animation: job-progress-indeterminate 1.4s var(--ease) infinite;
+}
+
+@keyframes job-progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.job-error {
   color: var(--error);
   font-size: 12px;
 }
 
-.history-row__transcript-status {
-  margin-top: 8px;
-  margin-left: 52px;
-  color: var(--text-dim);
-  font-size: 12px;
-}
+/* Result cards -------------------------------------------------------- */
 
-.history-row__transcript-panel {
-  margin-top: 12px;
-  margin-left: 52px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.history-row__transcript-section {
+.transcript-card {
   background: var(--glass-bg-strong);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
+  overflow: hidden;
+  max-width: 640px;
+}
+
+.transcript-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 14px;
 }
 
-.history-row__transcript-section-header {
+.transcript-card__header--toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  transition: background-color 140ms var(--ease);
+}
+
+.transcript-card__header--toggle:hover {
+  background: var(--glass-bg-hover);
+}
+
+.transcript-card__icon {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  font-weight: 600;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.transcript-card__icon--accent {
+  color: var(--accent);
+}
+
+.transcript-card__icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.transcript-card__title {
+  font-size: 12px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.6px;
   color: var(--text-dim);
-  margin-bottom: 8px;
 }
 
-.history-row__transcript-summary,
-.history-row__transcript-no-summary {
+.ai-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--ring);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+}
+
+.transcript-card__header .icon-btn {
+  margin-left: auto;
+}
+
+.transcript-card__chevron {
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  transition: transform 200ms var(--ease);
+}
+
+.transcript-card__header--toggle.is-expanded .transcript-card__chevron {
+  transform: rotate(180deg);
+}
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background-color 140ms var(--ease), color 140ms var(--ease), transform 140ms var(--ease);
+}
+
+.icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.icon-btn:hover {
+  background: var(--glass-bg-hover);
+  color: var(--accent);
+}
+
+.icon-btn:active {
+  transform: scale(0.9);
+}
+
+.transcript-card__body {
+  padding: 0 16px 16px;
+}
+
+.transcript-card__body--collapsible {
+  position: relative;
+  padding-top: 4px;
+  border-top: 1px solid var(--glass-border);
+  margin: 0 14px 14px;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.transcript-card__body--collapsible .icon-btn {
+  position: absolute;
+  top: 10px;
+  right: 0;
+}
+
+/* Markdown-rendered summary typography ------------------------------------ */
+
+.markdown-content {
   font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.6;
+  color: var(--text);
 }
 
-.history-row__transcript-no-summary {
-  color: var(--text-dim);
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 14px 0 6px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.markdown-content h1:first-child,
+.markdown-content h2:first-child,
+.markdown-content h3:first-child,
+.markdown-content h4:first-child {
+  margin-top: 0;
+}
+
+.markdown-content h1 { font-size: 16px; }
+.markdown-content h2 { font-size: 15px; }
+.markdown-content h3 { font-size: 14px; }
+.markdown-content h4 { font-size: 13px; }
+
+.markdown-content p {
+  margin: 0 0 10px;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.markdown-content em {
   font-style: italic;
 }
 
-.history-row__transcript-text {
+.markdown-content code {
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+  background: var(--input-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.markdown-content li {
+  margin-bottom: 4px;
+}
+
+.markdown-content li:last-child {
+  margin-bottom: 0;
+}
+
+/* Timestamped transcript lines ---------------------------------------- */
+
+.transcript-lines {
   max-height: 320px;
   overflow-y: auto;
-  margin: 0;
+  padding-top: 30px;
+}
+
+.transcript-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.transcript-line__time {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  background: var(--input-bg);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+
+.transcript-line__text {
+  color: var(--text);
+  overflow-wrap: break-word;
 }
 
 .tabs {
