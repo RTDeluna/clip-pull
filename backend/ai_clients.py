@@ -2,13 +2,16 @@ from pathlib import Path
 
 import httpx
 
-OPENAI_TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions"
+OPENROUTER_TRANSCRIPTION_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 # Model IDs and API version headers move faster than this codebase does --
-# verify these against platform.openai.com/docs and docs.anthropic.com at
+# verify these against openrouter.ai/docs and docs.anthropic.com at
 # implementation/update time rather than trusting them indefinitely.
-OPENAI_WHISPER_MODEL = "whisper-1"
+# OpenRouter's transcription endpoint is OpenAI-compatible (same request
+# shape as api.openai.com/v1/audio/transcriptions) but model IDs are
+# provider-prefixed -- "whisper-1" alone isn't valid here.
+OPENROUTER_WHISPER_MODEL = "openai/whisper-1"
 ANTHROPIC_MODEL = "claude-sonnet-4-5"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_MAX_SUMMARY_TOKENS = 1024
@@ -26,9 +29,9 @@ SUMMARY_PROMPT_TEMPLATE = (
 
 class AIClientError(Exception):
     """Raised for any non-2xx response or network failure talking to the
-    OpenAI/Anthropic APIs. status_code is None for network-level failures
-    (no response was ever received), letting callers distinguish "the
-    service rejected this" from "we couldn't reach it at all"."""
+    OpenRouter/Anthropic APIs. status_code is None for network-level
+    failures (no response was ever received), letting callers distinguish
+    "the service rejected this" from "we couldn't reach it at all"."""
 
     def __init__(self, message: str, *, provider: str, status_code: "int | None" = None):
         super().__init__(message)
@@ -36,32 +39,35 @@ class AIClientError(Exception):
         self.status_code = status_code
 
 
-class OpenAIWhisperClient:
+class OpenRouterTranscriptionClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
     def transcribe_chunk(self, chunk_path: Path, response_format: str = "verbose_json") -> dict:
-        """Blocking -- must run in a thread executor. Returns Whisper's
-        parsed JSON response, which (in verbose_json mode) includes a
-        top-level "duration" and a "segments" list with per-segment
-        start/end timestamps relative to this chunk's own start at 0."""
+        """Blocking -- must run in a thread executor. OpenRouter's
+        transcription endpoint mirrors OpenAI's Whisper API response shape:
+        in verbose_json mode, a top-level "duration" and a "segments" list
+        with per-segment start/end timestamps relative to this chunk's own
+        start at 0."""
         chunk_path = Path(chunk_path)
         try:
             with open(chunk_path, "rb") as f:
                 response = httpx.post(
-                    OPENAI_TRANSCRIPTION_URL,
+                    OPENROUTER_TRANSCRIPTION_URL,
                     headers={"Authorization": f"Bearer {self.api_key}"},
-                    data={"model": OPENAI_WHISPER_MODEL, "response_format": response_format},
+                    data={"model": OPENROUTER_WHISPER_MODEL, "response_format": response_format},
                     files={"file": (chunk_path.name, f, "audio/mpeg")},
                     timeout=REQUEST_TIMEOUT_SECONDS,
                 )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching OpenAI: {exc}", provider="openai") from exc
+            raise AIClientError(
+                f"Network error reaching OpenRouter: {exc}", provider="openrouter"
+            ) from exc
 
         if response.status_code >= 400:
             raise AIClientError(
-                f"OpenAI transcription request failed ({response.status_code}): {response.text[:500]}",
-                provider="openai",
+                f"OpenRouter transcription request failed ({response.status_code}): {response.text[:500]}",
+                provider="openrouter",
                 status_code=response.status_code,
             )
         return response.json()

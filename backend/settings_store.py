@@ -10,7 +10,7 @@ DEFAULT_SETTINGS = {
     "aria2c_enabled": True,
     "skip_duplicates": False,
     "default_output_folder": None,
-    "openai_api_key": None,
+    "openrouter_api_key": None,
     "anthropic_api_key": None,
 }
 
@@ -36,7 +36,7 @@ class SettingsStore:
             "aria2c_enabled": bool(row["aria2c_enabled"]),
             "skip_duplicates": bool(row["skip_duplicates"]),
             "default_output_folder": row["default_output_folder"],
-            "openai_api_key": row["openai_api_key"],
+            "openrouter_api_key": row["openrouter_api_key"],
             "anthropic_api_key": row["anthropic_api_key"],
         }
 

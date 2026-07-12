@@ -21,7 +21,7 @@ def humanize_transcription_error(exc: Exception) -> str:
         return str(exc)  # audio_extraction.py's own messages are already user-facing
 
     if isinstance(exc, AIClientError):
-        provider_name = "OpenAI" if exc.provider == "openai" else "Anthropic"
+        provider_name = "OpenRouter" if exc.provider == "openrouter" else "Anthropic"
         if exc.status_code == 401 or exc.status_code == 403:
             return (
                 f"{provider_name} rejected the API key in Settings — "

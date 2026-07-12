@@ -16,7 +16,7 @@ class SettingsUpdateRequest(BaseModel):
     aria2c_enabled: Optional[bool] = None
     skip_duplicates: Optional[bool] = None
     default_output_folder: Optional[str] = None
-    openai_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
 
 

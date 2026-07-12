@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from ai_clients import AIClientError, AnthropicClient, OpenAIWhisperClient
+from ai_clients import AIClientError, AnthropicClient, OpenRouterTranscriptionClient
 from audio_extraction import AudioExtractionError, extract_and_chunk_audio
 from history_store import HistoryStore
 from settings_store import SettingsStore
@@ -14,8 +14,8 @@ from transcription_errors import humanize_transcription_error, is_retryable
 logger = logging.getLogger("clippull")
 
 # Bounds simultaneous spend/CPU (ffmpeg) pressure from full transcription
-# jobs, and simultaneous in-flight requests to OpenAI per job -- both start
-# conservative since a user's actual OpenAI rate-limit tier isn't knowable
+# jobs, and simultaneous in-flight requests to OpenRouter per job -- both
+# start conservative since a user's actual rate-limit tier isn't knowable
 # in advance.
 MAX_CONCURRENT_TRANSCRIPTIONS = 2
 MAX_CONCURRENT_CHUNK_TRANSCRIPTIONS = 3
@@ -60,7 +60,7 @@ class TranscriptionOrchestrator:
         history_store: HistoryStore,
         settings_store: SettingsStore,
         broadcast: Optional[Callable[[dict], None]] = None,
-        openai_client_cls=OpenAIWhisperClient,
+        openrouter_client_cls=OpenRouterTranscriptionClient,
         anthropic_client_cls=AnthropicClient,
         extract_fn: Callable[..., list] = extract_and_chunk_audio,
         max_concurrent_jobs: int = MAX_CONCURRENT_TRANSCRIPTIONS,
@@ -69,7 +69,7 @@ class TranscriptionOrchestrator:
         self.history_store = history_store
         self.settings_store = settings_store
         self.broadcast = broadcast or (lambda message: None)
-        self.openai_client_cls = openai_client_cls
+        self.openrouter_client_cls = openrouter_client_cls
         self.anthropic_client_cls = anthropic_client_cls
         self.extract_fn = extract_fn
         self.max_concurrent_chunks = max_concurrent_chunks
@@ -143,12 +143,12 @@ class TranscriptionOrchestrator:
                     return
 
                 settings = self.settings_store.get()
-                openai_key = settings.get("openai_api_key")
+                openrouter_key = settings.get("openrouter_api_key")
                 anthropic_key = settings.get("anthropic_api_key")
-                if not openai_key:
+                if not openrouter_key:
                     self._fail(
                         history_id,
-                        "Add an OpenAI API key in Settings to enable transcription.",
+                        "Add an OpenRouter API key in Settings to enable transcription.",
                     )
                     return
 
@@ -164,7 +164,7 @@ class TranscriptionOrchestrator:
 
                 try:
                     chunk_results = await self._transcribe_chunks(
-                        history_id, chunks, openai_key, loop
+                        history_id, chunks, openrouter_key, loop
                     )
                 except AIClientError as exc:
                     self._fail(history_id, humanize_transcription_error(exc))
@@ -202,9 +202,9 @@ class TranscriptionOrchestrator:
             self._active_tasks.pop(history_id, None)
 
     async def _transcribe_chunks(
-        self, history_id: int, chunks: list[Path], openai_key: str, loop: asyncio.AbstractEventLoop
+        self, history_id: int, chunks: list[Path], openrouter_key: str, loop: asyncio.AbstractEventLoop
     ) -> list[dict]:
-        openai_client = self.openai_client_cls(openai_key)
+        openrouter_client = self.openrouter_client_cls(openrouter_key)
         chunk_semaphore = asyncio.Semaphore(self.max_concurrent_chunks)
         total = len(chunks)
 
@@ -217,7 +217,7 @@ class TranscriptionOrchestrator:
                 for attempt in range(CHUNK_RETRY_ATTEMPTS):
                     try:
                         return await loop.run_in_executor(
-                            None, openai_client.transcribe_chunk, chunk_path
+                            None, openrouter_client.transcribe_chunk, chunk_path
                         )
                     except AIClientError as exc:
                         last_exc = exc

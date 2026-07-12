@@ -42,7 +42,7 @@ def _make_video_file(tmp_path):
     return video
 
 
-class FakeOpenAIClient:
+class FakeOpenRouterClient:
     def __init__(self, api_key):
         self.api_key = api_key
 
@@ -70,7 +70,7 @@ def _make_orchestrator(**overrides):
         history_store=HistoryStore(),
         settings_store=SettingsStore(),
         broadcast=lambda message: broadcasts.append(message),
-        openai_client_cls=FakeOpenAIClient,
+        openrouter_client_cls=FakeOpenRouterClient,
         anthropic_client_cls=FakeAnthropicClient,
         extract_fn=_fake_extract_fn_factory(1),
     )
@@ -91,7 +91,7 @@ def test_transcribe_entry_success_with_both_keys_persists_transcript_and_summary
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai", anthropic_api_key="sk-anthropic")
+    settings_store.update(openrouter_api_key="sk-openrouter", anthropic_api_key="sk-anthropic")
     entry = _seed_done_entry(history_store, video)
 
     orchestrator, broadcasts = _make_orchestrator(history_store=history_store, settings_store=settings_store)
@@ -113,7 +113,7 @@ def test_transcribe_entry_skips_summary_when_no_anthropic_key(tmp_path):
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai")
+    settings_store.update(openrouter_api_key="sk-openrouter")
     entry = _seed_done_entry(history_store, video)
 
     orchestrator, _ = _make_orchestrator(history_store=history_store, settings_store=settings_store)
@@ -125,7 +125,7 @@ def test_transcribe_entry_skips_summary_when_no_anthropic_key(tmp_path):
     assert updated["summary"] is None
 
 
-def test_transcribe_entry_fails_when_no_openai_key(tmp_path):
+def test_transcribe_entry_fails_when_no_openrouter_key(tmp_path):
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
@@ -136,7 +136,7 @@ def test_transcribe_entry_fails_when_no_openai_key(tmp_path):
 
     updated = history_store.get(entry["id"])
     assert updated["transcript_status"] == "error"
-    assert "OpenAI API key" in updated["transcript_error"]
+    assert "OpenRouter API key" in updated["transcript_error"]
     assert broadcasts[-1]["status"] == "error"
     assert broadcasts[-1]["entry"]["transcript_error"] == updated["transcript_error"]
 
@@ -144,7 +144,7 @@ def test_transcribe_entry_fails_when_no_openai_key(tmp_path):
 def test_transcribe_entry_fails_when_download_not_done():
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai")
+    settings_store.update(openrouter_api_key="sk-openrouter")
     entry = history_store.record(
         entry_id="e1", batch_id=None, url="https://vimeo.com/1", title=None,
         output_path=None, total_size=None, status="error", error_reason="failed",
@@ -162,7 +162,7 @@ def test_transcribe_entry_fails_when_download_not_done():
 def test_transcribe_entry_fails_when_output_file_missing_from_disk(tmp_path):
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai")
+    settings_store.update(openrouter_api_key="sk-openrouter")
     entry = _seed_done_entry(history_store, tmp_path / "does-not-exist.mp4")
 
     orchestrator, _ = _make_orchestrator(history_store=history_store, settings_store=settings_store)
@@ -183,7 +183,7 @@ def test_transcribe_entry_persists_friendly_error_on_audio_extraction_failure(tm
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai")
+    settings_store.update(openrouter_api_key="sk-openrouter")
     entry = _seed_done_entry(history_store, video)
 
     def failing_extract(video_path, work_dir):
@@ -203,7 +203,7 @@ def test_transcribe_entry_persists_friendly_error_on_non_retryable_api_failure(t
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="bad-key")
+    settings_store.update(openrouter_api_key="bad-key")
     entry = _seed_done_entry(history_store, video)
 
     class UnauthorizedClient:
@@ -211,10 +211,10 @@ def test_transcribe_entry_persists_friendly_error_on_non_retryable_api_failure(t
             pass
 
         def transcribe_chunk(self, chunk_path, response_format="verbose_json"):
-            raise AIClientError("unauthorized", provider="openai", status_code=401)
+            raise AIClientError("unauthorized", provider="openrouter", status_code=401)
 
     orchestrator, _ = _make_orchestrator(
-        history_store=history_store, settings_store=settings_store, openai_client_cls=UnauthorizedClient
+        history_store=history_store, settings_store=settings_store, openrouter_client_cls=UnauthorizedClient
     )
     asyncio.run(orchestrator.transcribe_entry(entry["id"]))
 
@@ -227,7 +227,7 @@ def test_transcribe_entry_retries_transient_failures_before_succeeding(tmp_path)
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai")
+    settings_store.update(openrouter_api_key="sk-openrouter")
     entry = _seed_done_entry(history_store, video)
 
     call_count = {"n": 0}
@@ -239,11 +239,11 @@ def test_transcribe_entry_retries_transient_failures_before_succeeding(tmp_path)
         def transcribe_chunk(self, chunk_path, response_format="verbose_json"):
             call_count["n"] += 1
             if call_count["n"] < 2:
-                raise AIClientError("rate limited", provider="openai", status_code=429)
+                raise AIClientError("rate limited", provider="openrouter", status_code=429)
             return {"text": "recovered", "duration": 3.0, "segments": [{"start": 0.0, "text": "recovered"}]}
 
     orchestrator, _ = _make_orchestrator(
-        history_store=history_store, settings_store=settings_store, openai_client_cls=FlakyClient
+        history_store=history_store, settings_store=settings_store, openrouter_client_cls=FlakyClient
     )
     original_backoff = transcription_module.CHUNK_RETRY_BACKOFF_SECONDS
     transcription_module.CHUNK_RETRY_BACKOFF_SECONDS = 0.001
@@ -262,7 +262,7 @@ def test_request_transcription_guards_against_double_start(tmp_path):
     video = _make_video_file(tmp_path)
     history_store = HistoryStore()
     settings_store = SettingsStore()
-    settings_store.update(openai_api_key="sk-openai")
+    settings_store.update(openrouter_api_key="sk-openrouter")
     entry = _seed_done_entry(history_store, video)
 
     hold_event = asyncio.Event()
@@ -275,7 +275,7 @@ def test_request_transcription_guards_against_double_start(tmp_path):
             return {"text": "hi", "duration": 1.0, "segments": [{"start": 0.0, "text": "hi"}]}
 
     orchestrator, _ = _make_orchestrator(
-        history_store=history_store, settings_store=settings_store, openai_client_cls=SlowClient
+        history_store=history_store, settings_store=settings_store, openrouter_client_cls=SlowClient
     )
 
     async def scenario():

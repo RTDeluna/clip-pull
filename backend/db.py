@@ -42,6 +42,9 @@ MIGRATIONS = [
         ALTER TABLE settings ADD COLUMN openai_api_key TEXT;
         ALTER TABLE settings ADD COLUMN anthropic_api_key TEXT;
     """),
+    (5, """
+        ALTER TABLE settings RENAME COLUMN openai_api_key TO openrouter_api_key;
+    """),
 ]
 
 

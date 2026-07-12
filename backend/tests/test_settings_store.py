@@ -9,14 +9,14 @@ def test_get_returns_defaults_when_no_row_exists_yet():
     assert settings["aria2c_enabled"] is True
     assert settings["skip_duplicates"] is False
     assert settings["default_output_folder"] is None
-    assert settings["openai_api_key"] is None
+    assert settings["openrouter_api_key"] is None
     assert settings["anthropic_api_key"] is None
 
 
 def test_update_persists_api_keys():
     store = SettingsStore()
-    updated = store.update(openai_api_key="sk-abc", anthropic_api_key="sk-ant-xyz")
-    assert updated["openai_api_key"] == "sk-abc"
+    updated = store.update(openrouter_api_key="sk-or-abc", anthropic_api_key="sk-ant-xyz")
+    assert updated["openrouter_api_key"] == "sk-or-abc"
     assert updated["anthropic_api_key"] == "sk-ant-xyz"
 
 

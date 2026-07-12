@@ -1,4 +1,6 @@
-from db import get_connection, run_migrations
+import sqlite3
+
+from db import MIGRATIONS, get_connection, run_migrations
 
 
 def test_get_connection_creates_history_and_settings_tables():
@@ -67,4 +69,24 @@ def test_history_transcript_status_defaults_to_none():
 def test_settings_table_has_api_key_columns():
     conn = get_connection(":memory:")
     columns = _column_names(conn, "settings")
-    assert {"openai_api_key", "anthropic_api_key"} <= columns
+    assert {"openrouter_api_key", "anthropic_api_key"} <= columns
+    assert "openai_api_key" not in columns
+
+
+def test_migration_v5_preserves_existing_key_value_under_new_column_name(tmp_path):
+    # Simulates a real database that already ran migration v4 (e.g. from
+    # local testing before the rename) -- the rename must not silently
+    # drop whatever key the user had already entered.
+    db_path = tmp_path / "pre_rename.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    for version, sql in MIGRATIONS[:4]:
+        conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 4")
+    conn.execute("INSERT INTO settings (id, openai_api_key) VALUES (1, 'sk-already-saved')")
+    conn.commit()
+    conn.close()
+
+    migrated = get_connection(db_path)
+    row = migrated.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+    assert row["openrouter_api_key"] == "sk-already-saved"
