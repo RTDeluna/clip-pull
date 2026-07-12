@@ -1023,9 +1023,9 @@ input[type="checkbox"] {
 }
 
 .action-chip--accent:hover:not(:disabled) {
-  color: #fff;
-  filter: brightness(1.08);
-  border-color: transparent;
+  background: var(--glass-bg-strong);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .action-chip[hidden] {
@@ -1213,18 +1213,11 @@ input[type="checkbox"] {
 }
 
 .transcript-card__body--collapsible {
-  position: relative;
-  padding-top: 4px;
+  padding-top: 12px;
   border-top: 1px solid var(--glass-border);
   margin: 0 14px 14px;
   padding-left: 0;
   padding-right: 0;
-}
-
-.transcript-card__body--collapsible .icon-btn {
-  position: absolute;
-  top: 10px;
-  right: 0;
 }
 
 /* Markdown-rendered summary typography ------------------------------------ */

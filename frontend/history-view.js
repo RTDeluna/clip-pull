@@ -356,13 +356,13 @@ function renderHistoryRow(entry) {
       </div>
 
       <div class="transcript-card transcript-card--transcript" hidden>
-        <button class="transcript-card__header transcript-card__header--toggle" type="button" aria-expanded="false">
+        <div class="transcript-card__header transcript-card__header--toggle" role="button" tabindex="0" aria-expanded="false">
           <span class="transcript-card__icon">${DOCUMENT_ICON}</span>
           <span class="transcript-card__title">Transcript</span>
-          ${CHEVRON_ICON}
-        </button>
-        <div class="transcript-card__body transcript-card__body--collapsible" hidden>
           <button class="icon-btn copy-transcript-btn" type="button" aria-label="Copy transcript" title="Copy transcript">${COPY_ICON}</button>
+          ${CHEVRON_ICON}
+        </div>
+        <div class="transcript-card__body transcript-card__body--collapsible" hidden>
           <div class="transcript-lines"></div>
         </div>
       </div>
@@ -415,11 +415,19 @@ function renderHistoryRow(entry) {
 
   const transcriptToggle = row.querySelector(".transcript-card__header--toggle");
   const transcriptBody = row.querySelector(".transcript-card__body--collapsible");
-  transcriptToggle.addEventListener("click", () => {
+  const toggleTranscript = () => {
     const expanded = transcriptBody.hidden;
     transcriptBody.hidden = !expanded;
     transcriptToggle.setAttribute("aria-expanded", String(expanded));
     transcriptToggle.classList.toggle("is-expanded", expanded);
+  };
+  transcriptToggle.addEventListener("click", toggleTranscript);
+  transcriptToggle.addEventListener("keydown", (event) => {
+    if (event.target.closest(".copy-transcript-btn")) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleTranscript();
+    }
   });
 
   row.querySelector(".copy-summary-btn").addEventListener("click", (event) => {
