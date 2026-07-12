@@ -7,12 +7,15 @@ from downloader import check_ffmpeg_available, get_bundled_ffmpeg_path
 
 logger = logging.getLogger("clippull")
 
-# OpenAI's Whisper endpoint hard-caps requests at 25MB. TARGET_CHUNK_BYTES
-# stays well under that (not right up against it) to absorb MP3 encoder
+# Gemini's inline-audio request caps the WHOLE request (prompt + schema +
+# base64-encoded audio) at 20MB. Base64 inflates raw bytes by 4/3, so the
+# raw-chunk-size ceiling is lower than that stated limit -- GEMINI_INLINE_
+# REQUEST_LIMIT_BYTES is the API's real limit; TARGET_CHUNK_BYTES is sized
+# (pre-inflation) to land comfortably under it, also absorbing MP3 encoder
 # overhead and the fact that ffmpeg's segment muxer splits on an
 # approximate time boundary, not an exact byte count.
-WHISPER_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-TARGET_CHUNK_BYTES = 20 * 1024 * 1024
+GEMINI_INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024
+TARGET_CHUNK_BYTES = 14 * 1024 * 1024
 AUDIO_BITRATE_KBPS = 64
 AUDIO_SAMPLE_RATE_HZ = 16000
 
@@ -36,7 +39,7 @@ def extract_and_chunk_audio(
     target_chunk_bytes: int = TARGET_CHUNK_BYTES,
 ) -> list[Path]:
     """Extracts a compressed mono audio track from video_path and splits it
-    into chunks small enough for Whisper's 25MB per-request limit, via a
+    into chunks small enough for Gemini's inline-audio request limit, via a
     single ffmpeg invocation (extract + resample + encode + segment all at
     once). Blocking -- callers must run this inside run_in_executor, the
     same way downloader.py runs run_download/probe_total_bytes."""
@@ -74,7 +77,12 @@ def extract_and_chunk_audio(
         raise AudioExtractionError(
             "Audio extraction produced no output — this video may have no audio track."
         )
-    oversized = [c for c in chunks if c.stat().st_size > WHISPER_MAX_UPLOAD_BYTES]
+    # Checked post-base64-inflation (4/3 of raw bytes), since that's the
+    # actual request-size constraint the client sends against, not the raw
+    # chunk size on disk.
+    oversized = [
+        c for c in chunks if c.stat().st_size * 4 / 3 > GEMINI_INLINE_REQUEST_LIMIT_BYTES
+    ]
     if oversized:
         raise AudioExtractionError(
             "One or more audio chunks came out larger than the transcription "

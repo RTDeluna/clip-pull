@@ -21,8 +21,17 @@ def humanize_transcription_error(exc: Exception) -> str:
         return str(exc)  # audio_extraction.py's own messages are already user-facing
 
     if isinstance(exc, AIClientError):
-        provider_name = "OpenRouter" if exc.provider == "openrouter" else "Anthropic"
-        if exc.status_code == 401 or exc.status_code == 403:
+        provider_name = "Gemini" if exc.provider == "gemini" else "Anthropic"
+        # Most providers use 401/403 for a bad key -- Gemini instead reports
+        # it as a plain 400 INVALID_ARGUMENT ("API key not valid"), so that
+        # case needs matching on the response text (already embedded in the
+        # exception message by ai_clients.py) rather than status code alone.
+        looks_like_bad_key = exc.status_code in (401, 403) or (
+            exc.provider == "gemini"
+            and exc.status_code == 400
+            and "api key" in str(exc).lower()
+        )
+        if looks_like_bad_key:
             return (
                 f"{provider_name} rejected the API key in Settings — "
                 "check that it's correct and still active."

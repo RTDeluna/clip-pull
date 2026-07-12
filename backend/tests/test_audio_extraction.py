@@ -5,6 +5,8 @@ import pytest
 
 from audio_extraction import (
     AUDIO_BITRATE_KBPS,
+    GEMINI_INLINE_REQUEST_LIMIT_BYTES,
+    TARGET_CHUNK_BYTES,
     AudioExtractionError,
     chunk_duration_seconds,
     extract_and_chunk_audio,
@@ -66,6 +68,27 @@ def test_extract_and_chunk_audio_returns_sorted_chunk_paths(tmp_path):
 
 def test_extract_and_chunk_audio_raises_when_a_chunk_is_still_too_large(tmp_path):
     (tmp_path / "chunk_0000.mp3").write_bytes(b"x" * (26 * 1024 * 1024))
+    with patch("audio_extraction.check_ffmpeg_available", return_value=True), \
+         patch("audio_extraction.get_bundled_ffmpeg_path", return_value=None), \
+         patch(
+             "audio_extraction.subprocess.run",
+             return_value=FakeCompletedProcess(returncode=0, stderr=""),
+         ):
+        with pytest.raises(AudioExtractionError, match="larger than the transcription"):
+            extract_and_chunk_audio("video.mp4", str(tmp_path))
+
+
+def test_target_chunk_bytes_stays_under_gemini_limit_after_base64_inflation():
+    # Gemini's limit applies to the base64-encoded request, which is 4/3
+    # larger than the raw chunk bytes on disk -- this would have passed
+    # under the old (pre-base64-aware) Whisper-era 25MB raw-byte check.
+    assert TARGET_CHUNK_BYTES * 4 / 3 < GEMINI_INLINE_REQUEST_LIMIT_BYTES
+
+
+def test_extract_and_chunk_audio_raises_for_a_chunk_that_was_fine_under_the_old_whisper_limit(tmp_path):
+    # 16MB raw was comfortably under Whisper's 25MB raw-byte cap, but at
+    # 4/3 inflation (~21.3MB) it exceeds Gemini's 20MB encoded-request limit.
+    (tmp_path / "chunk_0000.mp3").write_bytes(b"x" * (16 * 1024 * 1024))
     with patch("audio_extraction.check_ffmpeg_available", return_value=True), \
          patch("audio_extraction.get_bundled_ffmpeg_path", return_value=None), \
          patch(

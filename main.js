@@ -246,7 +246,7 @@ ipcMain.handle("open-chrome-extensions", async () => {
 // accepting any renderer-supplied URL, since a compromised/buggy renderer
 // otherwise gets an arbitrary-URL-open primitive via shell.openExternal.
 const ALLOWED_EXTERNAL_URLS = new Set([
-  "https://openrouter.ai/settings/keys",
+  "https://aistudio.google.com/app/apikey",
   "https://console.anthropic.com/settings/keys",
 ]);
 

@@ -1,17 +1,20 @@
+import base64
+import json
 from pathlib import Path
 
 import httpx
 
-OPENROUTER_TRANSCRIPTION_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+GEMINI_GENERATE_CONTENT_URL_TEMPLATE = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 
 # Model IDs and API version headers move faster than this codebase does --
-# verify these against openrouter.ai/docs and docs.anthropic.com at
-# implementation/update time rather than trusting them indefinitely.
-# OpenRouter's transcription endpoint is OpenAI-compatible (same request
-# shape as api.openai.com/v1/audio/transcriptions) but model IDs are
-# provider-prefixed -- "whisper-1" alone isn't valid here.
-OPENROUTER_WHISPER_MODEL = "openai/whisper-1"
+# verify these against ai.google.dev/gemini-api/docs and docs.anthropic.com
+# at implementation/update time rather than trusting them indefinitely.
+# Flash is the deliberately cheap-but-current tier, not a stripped-down
+# "lite" variant.
+GEMINI_TRANSCRIPTION_MODEL = "gemini-3.5-flash"
 ANTHROPIC_MODEL = "claude-sonnet-4-5"
 ANTHROPIC_API_VERSION = "2023-06-01"
 ANTHROPIC_MAX_SUMMARY_TOKENS = 1024
@@ -26,12 +29,45 @@ SUMMARY_PROMPT_TEMPLATE = (
     "Transcript:\n{transcript}"
 )
 
+GEMINI_TRANSCRIPTION_PROMPT = (
+    "Transcribe this audio completely and accurately. Break the transcript "
+    "into natural segments (roughly a sentence each). For every segment, "
+    "report its start time in seconds measured from the beginning of this "
+    "audio file, and the spoken text. Also report the audio's total "
+    "duration in seconds. Respond with only the JSON described by the "
+    "response schema -- no extra commentary."
+)
+
+# Requesting numeric seconds (not a formatted timestamp string) keeps this
+# directly usable by transcription.py's stitching math without a parsing
+# step. Unlike a dedicated ASR model, these timestamps come from the model
+# being asked to report them, not from acoustic alignment -- fine for a
+# human-skimmable transcript, not frame-accurate subtitle sync.
+GEMINI_TRANSCRIPTION_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "duration_seconds": {"type": "NUMBER"},
+        "segments": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "start_seconds": {"type": "NUMBER"},
+                    "text": {"type": "STRING"},
+                },
+                "required": ["start_seconds", "text"],
+            },
+        },
+    },
+    "required": ["duration_seconds", "segments"],
+}
+
 
 class AIClientError(Exception):
     """Raised for any non-2xx response or network failure talking to the
-    OpenRouter/Anthropic APIs. status_code is None for network-level
-    failures (no response was ever received), letting callers distinguish
-    "the service rejected this" from "we couldn't reach it at all"."""
+    Gemini/Anthropic APIs. status_code is None for network-level failures
+    (no response was ever received), letting callers distinguish "the
+    service rejected this" from "we couldn't reach it at all"."""
 
     def __init__(self, message: str, *, provider: str, status_code: "int | None" = None):
         super().__init__(message)
@@ -39,38 +75,67 @@ class AIClientError(Exception):
         self.status_code = status_code
 
 
-class OpenRouterTranscriptionClient:
+class GeminiTranscriptionClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
     def transcribe_chunk(self, chunk_path: Path, response_format: str = "verbose_json") -> dict:
-        """Blocking -- must run in a thread executor. OpenRouter's
-        transcription endpoint mirrors OpenAI's Whisper API response shape:
-        in verbose_json mode, a top-level "duration" and a "segments" list
-        with per-segment start/end timestamps relative to this chunk's own
-        start at 0."""
+        """Blocking -- must run in a thread executor. Gemini has no
+        dedicated transcription endpoint; this sends the audio inline to
+        generateContent with a JSON response schema, then reshapes the
+        result into the same {"duration": float, "segments": [{"start":
+        float, "text": str}]} shape the previous Whisper-based client
+        returned, so transcription.py's stitching logic needs no changes
+        regardless of which provider is configured. response_format is
+        accepted for interface compatibility but unused -- Gemini's
+        structured-output schema is what actually shapes the response."""
         chunk_path = Path(chunk_path)
+        encoded_audio = base64.b64encode(chunk_path.read_bytes()).decode("ascii")
+        url = GEMINI_GENERATE_CONTENT_URL_TEMPLATE.format(model=GEMINI_TRANSCRIPTION_MODEL)
         try:
-            with open(chunk_path, "rb") as f:
-                response = httpx.post(
-                    OPENROUTER_TRANSCRIPTION_URL,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    data={"model": OPENROUTER_WHISPER_MODEL, "response_format": response_format},
-                    files={"file": (chunk_path.name, f, "audio/mpeg")},
-                    timeout=REQUEST_TIMEOUT_SECONDS,
-                )
+            response = httpx.post(
+                url,
+                headers={"x-goog-api-key": self.api_key, "content-type": "application/json"},
+                json={
+                    "contents": [
+                        {
+                            "parts": [
+                                {"text": GEMINI_TRANSCRIPTION_PROMPT},
+                                {"inline_data": {"mime_type": "audio/mpeg", "data": encoded_audio}},
+                            ]
+                        }
+                    ],
+                    "generationConfig": {
+                        "response_mime_type": "application/json",
+                        "response_schema": GEMINI_TRANSCRIPTION_RESPONSE_SCHEMA,
+                    },
+                },
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
         except httpx.HTTPError as exc:
-            raise AIClientError(
-                f"Network error reaching OpenRouter: {exc}", provider="openrouter"
-            ) from exc
+            raise AIClientError(f"Network error reaching Gemini: {exc}", provider="gemini") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
-                f"OpenRouter transcription request failed ({response.status_code}): {response.text[:500]}",
-                provider="openrouter",
+                f"Gemini transcription request failed ({response.status_code}): {response.text[:500]}",
+                provider="gemini",
                 status_code=response.status_code,
             )
-        return response.json()
+
+        body = response.json()
+        try:
+            raw_text = body["candidates"][0]["content"]["parts"][0]["text"]
+            parsed = json.loads(raw_text)
+        except (KeyError, IndexError, ValueError) as exc:
+            raise AIClientError(
+                f"Gemini returned an unexpected response shape: {exc}", provider="gemini"
+            ) from exc
+
+        segments = [
+            {"start": segment.get("start_seconds", 0.0), "text": segment.get("text", "")}
+            for segment in parsed.get("segments", [])
+        ]
+        return {"duration": parsed.get("duration_seconds", 0.0), "segments": segments}
 
 
 class AnthropicClient:

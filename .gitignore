@@ -16,3 +16,4 @@ assets/extension/*.zip
 .pytest_cache/
 docs/
 pytest.ini
+.env

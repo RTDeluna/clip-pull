@@ -45,6 +45,9 @@ MIGRATIONS = [
     (5, """
         ALTER TABLE settings RENAME COLUMN openai_api_key TO openrouter_api_key;
     """),
+    (6, """
+        ALTER TABLE settings RENAME COLUMN openrouter_api_key TO gemini_api_key;
+    """),
 ]
 
 

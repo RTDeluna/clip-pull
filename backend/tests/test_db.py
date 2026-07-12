@@ -69,8 +69,9 @@ def test_history_transcript_status_defaults_to_none():
 def test_settings_table_has_api_key_columns():
     conn = get_connection(":memory:")
     columns = _column_names(conn, "settings")
-    assert {"openrouter_api_key", "anthropic_api_key"} <= columns
+    assert {"gemini_api_key", "anthropic_api_key"} <= columns
     assert "openai_api_key" not in columns
+    assert "openrouter_api_key" not in columns
 
 
 def test_migration_v5_preserves_existing_key_value_under_new_column_name(tmp_path):
@@ -89,4 +90,22 @@ def test_migration_v5_preserves_existing_key_value_under_new_column_name(tmp_pat
 
     migrated = get_connection(db_path)
     row = migrated.execute("SELECT * FROM settings WHERE id = 1").fetchone()
-    assert row["openrouter_api_key"] == "sk-already-saved"
+    assert row["gemini_api_key"] == "sk-already-saved"
+
+
+def test_migration_v6_preserves_existing_key_value_under_new_column_name(tmp_path):
+    # Simulates a real database that already ran migration v5 (e.g. from
+    # local testing of the OpenRouter swap before this second rename).
+    db_path = tmp_path / "pre_second_rename.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    for version, sql in MIGRATIONS[:5]:
+        conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 5")
+    conn.execute("INSERT INTO settings (id, openrouter_api_key) VALUES (1, 'sk-or-already-saved')")
+    conn.commit()
+    conn.close()
+
+    migrated = get_connection(db_path)
+    row = migrated.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+    assert row["gemini_api_key"] == "sk-or-already-saved"
