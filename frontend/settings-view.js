@@ -11,6 +11,7 @@ const aria2cDetectedNote = document.getElementById("aria2c-detected-note");
 const skipDuplicatesInput = document.getElementById("setting-skip-duplicates");
 const autoTranscribeInput = document.getElementById("setting-auto-transcribe");
 const autoSummarizeInput = document.getElementById("setting-auto-summarize");
+const timeSavedRateInput = document.getElementById("setting-time-saved-rate");
 const defaultFolderInput = document.getElementById("setting-default-folder");
 const browseBtn = document.getElementById("setting-browse-btn");
 const apiKeyInputs = {
@@ -22,10 +23,6 @@ const apiKeyInputs = {
 };
 const saveBtn = document.getElementById("settings-save-btn");
 const settingsPanel = saveBtn.closest(".panel");
-
-// AI Usage panel.
-const usageSummary = document.getElementById("usage-summary");
-const usageRefreshBtn = document.getElementById("usage-refresh-btn");
 
 // Duplicated (not imported) from the backend's provider map — same five
 // entries history-view.js keeps its own copy of. There's no shared
@@ -168,6 +165,7 @@ function applySettings(settings) {
   autoTranscribeInput.checked = settings.auto_transcribe_on_download;
   autoSummarizeInput.checked = settings.auto_summarize_after_transcribe;
   updateAutoSummarizeState();
+  timeSavedRateInput.value = settings.time_saved_hourly_rate ?? "";
   defaultFolderInput.value = settings.default_output_folder || "";
   Object.entries(apiKeyInputs).forEach(([provider, input]) => {
     input.value = settings[`${provider}_api_key`] || "";
@@ -340,6 +338,7 @@ saveBtn.addEventListener("click", async () => {
         skip_duplicates: skipDuplicatesInput.checked,
         auto_transcribe_on_download: autoTranscribeInput.checked,
         auto_summarize_after_transcribe: autoSummarizeInput.checked,
+        time_saved_hourly_rate: timeSavedRateInput.value ? Number(timeSavedRateInput.value) : null,
         default_output_folder: defaultFolderInput.value || null,
         ...apiKeyFields,
         ...providerFields,
@@ -475,112 +474,5 @@ licenseUpgradeBtn.addEventListener("click", () => {
   window.api.openExternal(GUMROAD_PRO_URL);
 });
 
-// A provider bills either by tokens (gemini / anthropic / openai-summary /
-// openrouter) or by audio duration (openai-whisper / groq transcription,
-// which report audio_seconds with the token fields at 0) — never assume
-// tokens are present. Show whichever this provider actually reported, then
-// fall back to calls alone if it somehow reported neither.
-function formatUsageMeta(stats) {
-  const parts = [];
-  if (stats.total_tokens > 0) {
-    parts.push(`${stats.total_tokens.toLocaleString()} tokens`);
-  } else if (stats.audio_seconds > 0) {
-    parts.push(`${(stats.audio_seconds / 60).toFixed(1)} min audio`);
-  }
-  const calls = stats.calls ?? 0;
-  parts.push(`${calls.toLocaleString()} ${calls === 1 ? "call" : "calls"}`);
-  return parts.join(" · ");
-}
-
-// null cost means the pricing table had no entry for this provider/model —
-// surface "cost unknown" rather than a misleading "$0.00" / "$null". Four
-// decimals since these can be fractions of a cent.
-function formatCost(cost) {
-  return cost == null ? "cost unknown" : `$${cost.toFixed(4)}`;
-}
-
-function showUsageMessage(text) {
-  usageSummary.innerHTML = "";
-  const p = document.createElement("p");
-  p.className = "usage-empty";
-  p.textContent = text;
-  usageSummary.appendChild(p);
-}
-
-function renderUsage(data) {
-  const providers = data?.providers ?? {};
-  const entries = Object.entries(providers);
-  if (entries.length === 0) {
-    showUsageMessage("No AI usage recorded yet — transcribe or summarize a video to see costs here.");
-    return;
-  }
-
-  usageSummary.innerHTML = "";
-  let costTotal = 0;
-  let anyCostKnown = false;
-
-  entries.forEach(([provider, stats]) => {
-    const row = document.createElement("div");
-    row.className = "usage-row";
-
-    const name = document.createElement("span");
-    name.className = "usage-row__name";
-    name.textContent = PROVIDER_DISPLAY_NAMES[provider] || provider;
-
-    const meta = document.createElement("span");
-    meta.className = "usage-row__meta";
-    meta.textContent = formatUsageMeta(stats);
-
-    const cost = document.createElement("span");
-    cost.className = "usage-row__cost";
-    cost.textContent = formatCost(stats.estimated_cost_usd);
-
-    if (stats.estimated_cost_usd != null) {
-      costTotal += stats.estimated_cost_usd;
-      anyCostKnown = true;
-    }
-
-    row.append(name, meta, cost);
-    usageSummary.appendChild(row);
-  });
-
-  // Sum only the known costs; if every provider's cost was null, a "$0.00"
-  // total would misleadingly read as "free", so say so plainly instead.
-  const total = document.createElement("div");
-  total.className = "usage-total";
-  const totalCalls = data?.total_calls ?? 0;
-  const label = document.createElement("span");
-  label.className = "usage-total__label";
-  label.textContent = `${totalCalls.toLocaleString()} total ${totalCalls === 1 ? "call" : "calls"}`;
-  const totalCost = document.createElement("span");
-  totalCost.className = "usage-total__cost";
-  totalCost.textContent = anyCostKnown ? `$${costTotal.toFixed(4)}` : "Cost estimate unavailable";
-  total.append(label, totalCost);
-  usageSummary.appendChild(total);
-}
-
-// Best-effort, mirrors loadLicense above: a single attempt, and a failure
-// degrades to a neutral "unavailable" line rather than throwing and taking
-// down the rest of the Settings view.
-async function loadUsage() {
-  try {
-    const response = await fetch(`${API_BASE}/usage`);
-    if (!response.ok) throw new Error(`usage fetch failed: ${response.status}`);
-    renderUsage(await response.json());
-  } catch (error) {
-    console.warn("Couldn't load AI usage:", error);
-    showUsageMessage("Usage data unavailable.");
-  }
-}
-
-usageRefreshBtn.addEventListener("click", async () => {
-  usageRefreshBtn.disabled = true;
-  usageRefreshBtn.classList.add("is-spinning");
-  await loadUsage();
-  usageRefreshBtn.classList.remove("is-spinning");
-  usageRefreshBtn.disabled = false;
-});
-
 loadSettings();
 loadLicense();
-loadUsage();

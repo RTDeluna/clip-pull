@@ -148,12 +148,37 @@ class AIClientError(Exception):
     """Raised for any non-2xx response or network failure talking to the
     Gemini/Anthropic APIs. status_code is None for network-level failures
     (no response was ever received), letting callers distinguish "the
-    service rejected this" from "we couldn't reach it at all"."""
+    service rejected this" from "we couldn't reach it at all". timed_out
+    further splits that second case: a connection failure never reached the
+    provider at all (safe to retry), but a timeout is ambiguous -- the
+    provider may have already received the request and started (or even
+    finished) processing/billing it before the client gave up waiting. See
+    is_retryable in transcription_errors.py, which treats the two
+    differently to avoid auto-retrying a request that might double-bill the
+    user's own API key."""
 
-    def __init__(self, message: str, *, provider: str, status_code: "int | None" = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        status_code: "int | None" = None,
+        timed_out: bool = False,
+    ):
         super().__init__(message)
         self.provider = provider
         self.status_code = status_code
+        self.timed_out = timed_out
+
+
+def _network_error(exc: Exception, *, provider: str) -> AIClientError:
+    """Builds the AIClientError for a request that never got a response
+    back at all. Shared by every provider client below so the
+    connect-vs-timeout distinction (see AIClientError's docstring) is made
+    consistently in one place instead of per call site."""
+    timed_out = isinstance(exc, httpx.TimeoutException)
+    verb = "Timed out reaching" if timed_out else "Network error reaching"
+    return AIClientError(f"{verb} {provider}: {exc}", provider=provider, timed_out=timed_out)
 
 
 class GeminiTranscriptionClient:
@@ -195,7 +220,7 @@ class GeminiTranscriptionClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching Gemini: {exc}", provider="gemini") from exc
+            raise _network_error(exc, provider="gemini") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -259,9 +284,7 @@ class AnthropicClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(
-                f"Network error reaching Anthropic: {exc}", provider="anthropic"
-            ) from exc
+            raise _network_error(exc, provider="anthropic") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -310,9 +333,7 @@ class AnthropicClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(
-                f"Network error reaching Anthropic: {exc}", provider="anthropic"
-            ) from exc
+            raise _network_error(exc, provider="anthropic") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -359,7 +380,7 @@ def _transcribe_via_openai_compatible_endpoint(
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
     except httpx.HTTPError as exc:
-        raise AIClientError(f"Network error reaching {provider}: {exc}", provider=provider) from exc
+        raise _network_error(exc, provider=provider) from exc
 
     if response.status_code >= 400:
         raise AIClientError(
@@ -439,7 +460,7 @@ class OpenAISummaryClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching OpenAI: {exc}", provider="openai") from exc
+            raise _network_error(exc, provider="openai") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -477,7 +498,7 @@ class OpenAISummaryClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching OpenAI: {exc}", provider="openai") from exc
+            raise _network_error(exc, provider="openai") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -520,7 +541,7 @@ class GeminiSummaryClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching Gemini: {exc}", provider="gemini") from exc
+            raise _network_error(exc, provider="gemini") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -574,7 +595,7 @@ class GeminiSummaryClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching Gemini: {exc}", provider="gemini") from exc
+            raise _network_error(exc, provider="gemini") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -625,7 +646,7 @@ class OpenRouterSummaryClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching OpenRouter: {exc}", provider="openrouter") from exc
+            raise _network_error(exc, provider="openrouter") from exc
 
         if response.status_code >= 400:
             raise AIClientError(
@@ -663,7 +684,7 @@ class OpenRouterSummaryClient:
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except httpx.HTTPError as exc:
-            raise AIClientError(f"Network error reaching OpenRouter: {exc}", provider="openrouter") from exc
+            raise _network_error(exc, provider="openrouter") from exc
 
         if response.status_code >= 400:
             raise AIClientError(

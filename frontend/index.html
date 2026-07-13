@@ -2,21 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- Defense-in-depth, not a fix for anything reachable today (the
+       renderer never loads remote/attacker content -- see the security
+       audit this closes out). Blocks any future regression from silently
+       gaining the ability to load remote scripts/frames/connections
+       against the window.api bridge. script-src/style-src stay strict
+       ('self' only, no inline/eval) since every script is an external
+       module file and the one previously-inline style became a CSS class
+       (see styles.css's .skeleton--w150) specifically to avoid needing
+       'unsafe-inline' here. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' file: data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none';" />
   <title>Course Downloader</title>
-  <script>
-    (function () {
-      var STORAGE_KEY = "clippull-theme";
-      var theme = "dark";
-      try {
-        theme =
-          localStorage.getItem(STORAGE_KEY) ||
-          (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-      } catch (e) {
-        // localStorage unavailable — fall back to dark.
-      }
-      document.documentElement.setAttribute("data-theme", theme);
-    })();
-  </script>
+  <script src="theme-init.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -50,6 +47,14 @@
             <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
           </svg>
           <span class="nav-label">Settings</span>
+        </button>
+        <button class="nav-btn" data-view="view-insights" type="button" title="Insights">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="20" x2="18" y2="10"></line>
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+          </svg>
+          <span class="nav-label">Insights</span>
         </button>
       </nav>
 
@@ -85,10 +90,11 @@
       <div class="extension-hero">
         <img src="../assets/extension-icon.png" alt="" class="extension-hero__icon" />
         <div>
-          <h3 id="extension-popup-title" class="extension-hero__title">Skool Video Downloader</h3>
+          <h3 id="extension-popup-title" class="extension-hero__title">CLIP.PULL Course Downloader</h3>
           <p class="extension-hero__pitch">
-            A Chrome extension that detects the video on a Skool lesson page and sends it
-            straight into Clip.Pull's Queue tab — no copy-pasting links.
+            A Chrome extension that detects the video on a course lesson page — Skool, Loom,
+            Teachable, Kajabi, Thinkific, Circle, and more — and sends it straight into
+            Clip.Pull's Queue tab — no copy-pasting links.
           </p>
         </div>
         <button class="extension-popup__close" type="button" aria-label="Close">
@@ -110,9 +116,10 @@
           <li>Select the unzipped folder</li>
         </ol>
         <p class="extension-steps__note">
-          Once it's installed, open any course lesson with a video and click the CLIP.PULL
-          button the extension adds to your toolbar — the video drops straight into your Queue,
-          ready to download.
+          Once it's installed, open a course lesson with a video — Skool, Loom, Teachable,
+          Kajabi, Thinkific, Circle, and most other course sites all work — and click the
+          CLIP.PULL button the extension adds to your toolbar. The video drops straight into
+          your Queue, ready to download.
         </p>
       </div>
     </div>
@@ -234,6 +241,7 @@
               <path d="M21 3v6h-6"></path>
             </svg>
           </button>
+          <button id="history-retry-failed-btn" class="btn btn--ghost btn--pill" type="button">Retry all failed</button>
           <button id="history-clear-btn" class="btn btn--ghost btn--pill" type="button">Clear all</button>
         </div>
       </div>
@@ -293,7 +301,7 @@
 
         <div id="license-status" class="license-status" data-status="none">
           <span class="license-status__dot" aria-hidden="true"></span>
-          <p id="license-status-text" class="license-status__text">Checking…</p>
+          <p id="license-status-text" class="license-status__text"><span class="skeleton skeleton--line skeleton--w150"></span></p>
         </div>
 
         <label class="field-label" for="setting-license-key">License key</label>
@@ -331,6 +339,19 @@
         <label class="field-label field-label--nested">
           <input id="setting-auto-summarize" type="checkbox" /> …and summarize them too
         </label>
+
+        <label class="field-label" for="setting-time-saved-rate">Your hourly rate (optional)</label>
+        <input
+          id="setting-time-saved-rate"
+          class="text-input"
+          type="number"
+          min="0"
+          step="1"
+          placeholder="e.g. 40"
+        />
+        <p class="field-hint">
+          Used only to show "time saved" in dollars on the Insights tab — never sent anywhere.
+        </p>
 
         <label class="field-label" for="setting-default-folder">Default output folder</label>
         <div class="folder-picker">
@@ -551,24 +572,78 @@
         <button id="settings-save-btn" class="btn btn--primary" type="button">Save Settings</button>
       </div>
 
-      <section class="panel">
-        <div class="usage-header">
-          <h3 class="settings-section__title">
-            <svg class="settings-section__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-            AI Usage
-          </h3>
-          <button id="usage-refresh-btn" class="icon-btn" type="button" aria-label="Refresh usage" title="Refresh usage">
+    </div>
+  </div>
+
+  <div id="view-insights" class="view" hidden>
+    <div class="app app--wide">
+      <header class="app__header">
+        <h1 class="app__title">Insights</h1>
+        <p class="app__subtitle">Where your AI usage goes, and what it's costing you.</p>
+      </header>
+
+      <div class="insights-toolbar">
+        <div class="insights-range" role="radiogroup" aria-label="Date range">
+          <button class="insights-range__btn" type="button" data-range="7d" aria-pressed="false">7 days</button>
+          <button class="insights-range__btn" type="button" data-range="30d" aria-pressed="true">30 days</button>
+          <button class="insights-range__btn" type="button" data-range="90d" aria-pressed="false">90 days</button>
+          <button class="insights-range__btn" type="button" data-range="all" aria-pressed="false">All time</button>
+        </div>
+        <div class="insights-toolbar__actions">
+          <button id="insights-export-btn" class="btn btn--ghost btn--pill" type="button">Export CSV</button>
+          <button id="insights-refresh-btn" class="icon-btn" type="button" aria-label="Refresh insights" title="Refresh insights">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-3-6.7"></path>
               <path d="M21 3v6h-6"></path>
             </svg>
           </button>
         </div>
-        <p class="settings-section__subtitle">
-          Token usage and estimated cost across your configured AI providers.
-          These are rough estimates — check your provider's own dashboard for exact billing.
-        </p>
-        <div id="usage-summary" class="usage-list"></div>
+      </div>
+
+      <div id="insights-kpi-grid" class="kpi-grid"></div>
+
+      <div id="insights-recommendation" class="provider-recommendation" hidden></div>
+
+      <div id="insights-cost-warning" class="extension-status extension-status--error" hidden>
+        Some recent usage couldn't be priced, so costs shown here may be understated.
+      </div>
+
+      <div id="insights-pro-panels" class="insights-pro-panels">
+        <section class="panel insights-chart-panel">
+          <h3 class="settings-section__title">
+            <svg class="settings-section__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            Usage over time
+          </h3>
+          <div id="insights-trend-chart" class="insights-chart"></div>
+        </section>
+
+        <section class="panel">
+          <h3 class="settings-section__title">By feature</h3>
+          <div id="insights-operation-list" class="usage-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="transcript-card__header transcript-card__header--toggle" id="insights-videos-toggle" role="button" tabindex="0" aria-expanded="false">
+            <span class="transcript-card__title">Most expensive videos</span>
+            <svg class="transcript-card__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </div>
+          <div id="insights-video-list" class="transcript-card__body--collapsible" hidden></div>
+        </section>
+
+        <div id="insights-lock-overlay" class="insights-lock-overlay" hidden>
+          <p>Trends, per-feature costs, and per-video breakdowns are a CLIP.PULL Pro feature.</p>
+          <button id="insights-upgrade-btn" class="btn btn--primary btn--pill" type="button">Upgrade to Pro</button>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="usage-header">
+          <h3 class="settings-section__title">By provider</h3>
+          <span class="settings-section__subtitle insights-provider-note">
+            These are rough estimates — check your provider's own dashboard for exact billing.
+          </span>
+        </div>
+        <div id="insights-provider-list" class="usage-list"></div>
       </section>
     </div>
   </div>
@@ -606,6 +681,7 @@
   <script type="module" src="ws-client.js"></script>
   <script type="module" src="sidebar.js"></script>
   <script type="module" src="settings-view.js"></script>
+  <script type="module" src="insights-view.js"></script>
   <script type="module" src="history-view.js"></script>
   <script type="module" src="extension-view.js"></script>
   <script type="module" src="onboarding.js"></script>

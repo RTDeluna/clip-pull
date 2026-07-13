@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Skool Video Downloader",
-  "version": "2.0.0",
-  "description": "Detect Skool lesson videos — Skool Native (Mux), YouTube, Vimeo, Loom, Wistia, and Bunny Stream — and send them straight to Clip.Pull's download queue.",
-  "permissions": ["activeTab", "storage", "notifications"],
+  "name": "CLIP.PULL Course Downloader",
+  "version": "2.1.0",
+  "description": "Detect course lesson videos — Skool Native (Mux), YouTube, Vimeo, Loom, Wistia, and Bunny Stream — on Skool, Loom, Teachable, Kajabi, Thinkific, Circle, Systeme.io, ClickFunnels, GHL, and more, and send them straight to Clip.Pull's download queue.",
+  "permissions": ["activeTab", "scripting", "storage", "notifications"],
   "host_permissions": [
     "https://www.skool.com/*",
     "https://skool.com/*",

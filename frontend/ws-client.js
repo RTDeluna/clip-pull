@@ -1,5 +1,10 @@
 const BACKEND_PORT = window.api?.backendPort ?? 8934;
-const WS_URL = `ws://127.0.0.1:${BACKEND_PORT}/ws`;
+// The WebSocket constructor can't set custom headers, unlike fetch() (which
+// gets the token injected transparently by main.js) -- so it rides as a
+// query param instead. The backend validates it in the /ws handshake itself
+// (see main.py's websocket_endpoint), closing the connection immediately if
+// it's missing/wrong.
+const WS_URL = `ws://127.0.0.1:${BACKEND_PORT}/ws?token=${encodeURIComponent(window.api?.apiToken ?? "")}`;
 
 // Capped exponential backoff: start at 1s and double each failed attempt up to
 // 10s, so a backend that's slow to come up (or briefly down) isn't hammered

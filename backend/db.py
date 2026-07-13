@@ -89,6 +89,15 @@ MIGRATIONS = [
         ALTER TABLE settings ADD COLUMN auto_transcribe_on_download INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE settings ADD COLUMN auto_summarize_after_transcribe INTEGER NOT NULL DEFAULT 0;
     """),
+    (12, """
+        CREATE INDEX IF NOT EXISTS idx_ai_usage_created_at ON ai_usage(created_at);
+    """),
+    (13, """
+        ALTER TABLE history ADD COLUMN output_folder TEXT;
+    """),
+    (14, """
+        ALTER TABLE settings ADD COLUMN time_saved_hourly_rate REAL;
+    """),
 ]
 
 

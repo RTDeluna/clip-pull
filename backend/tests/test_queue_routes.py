@@ -386,6 +386,60 @@ def test_retry_entry_still_works_normally_for_a_real_entry_id():
     assert response.status_code == 202
 
 
+def test_retry_entry_rejects_a_duplicate_call_while_already_downloading():
+    # The core idempotency guard: a second /retry for an entry that's
+    # already downloading (whether a genuine double-fire or a stale click)
+    # must not reset it back to 0% and spin up a second concurrent download
+    # of the same file underneath the first.
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/561", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.set_status(entry_id, "downloading")
+
+    response = client.post(f"/queue/{entry_id}/retry", json={})
+    assert response.status_code == 409
+    # And the in-flight download's own state must be left untouched.
+    assert queue_manager.get(entry_id).status == "downloading"
+
+
+def test_retry_entry_rejects_when_entry_is_still_queued():
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/562", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+
+    response = client.post(f"/queue/{entry_id}/retry", json={})
+    assert response.status_code == 409
+
+
+def test_resume_entry_rejects_a_duplicate_call_while_already_downloading():
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/563", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.set_status(entry_id, "downloading")
+
+    response = client.post(f"/queue/{entry_id}/resume", json={})
+    assert response.status_code == 409
+    assert queue_manager.get(entry_id).status == "downloading"
+
+
+def test_resume_entry_rejects_when_entry_is_not_paused():
+    client, queue_manager, _, _, _ = _make_client()
+    post_response = client.post(
+        "/queue", json={"urls_text": "https://vimeo.com/564", "output_folder": "C:/downloads"}
+    )
+    entry_id = post_response.json()["entries"][0]["id"]
+    queue_manager.set_error(entry_id, "some error")
+
+    response = client.post(f"/queue/{entry_id}/resume", json={})
+    assert response.status_code == 409
+
+
 def test_post_queue_rejects_batches_over_the_max_size():
     client, _, _, _, _ = _make_client()
     urls_text = "\n".join(f"https://vimeo.com/{i}" for i in range(MAX_URLS_PER_BATCH + 1))

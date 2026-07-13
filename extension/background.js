@@ -1,4 +1,4 @@
-// background.js — Skool Video Downloader service worker.
+// background.js — CLIP.PULL Course Downloader service worker.
 // Pure capture-and-handoff: detect a link (via content.js), verify Clip.Pull
 // is reachable, then POST it into Clip.Pull's own download queue. Clip.Pull's
 // Queue tab owns all progress/history/retry from that point on — this worker

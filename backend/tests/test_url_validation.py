@@ -41,6 +41,30 @@ def test_rejects_garbage_text():
     assert is_supported_url("not a url at all") is False
 
 
+def test_rejects_loopback_ip():
+    assert is_supported_url("http://127.0.0.1:8934/settings") is False
+
+
+def test_rejects_loopback_hostname_literal():
+    assert is_supported_url("http://0.0.0.0/") is False
+
+
+def test_rejects_ipv6_loopback():
+    assert is_supported_url("http://[::1]/") is False
+
+
+def test_rejects_private_network_ip():
+    assert is_supported_url("http://192.168.1.1/") is False
+
+
+def test_rejects_cloud_metadata_ip():
+    assert is_supported_url("http://169.254.169.254/latest/meta-data/") is False
+
+
+def test_accepts_ordinary_hostname_that_is_not_a_literal_ip():
+    assert is_supported_url("https://vimeo.com/123456789") is True
+
+
 def test_parse_url_list_splits_valid_and_invalid_lines():
     text = "https://vimeo.com/111\nnot a url\nhttps://www.loom.com/share/abc\n\n"
     valid, invalid = parse_url_list(text)

@@ -52,6 +52,11 @@ MAX_CHAT_TRANSCRIPT_CHARS = MAX_SUMMARY_TRANSCRIPT_CHARS
 # so the frontend never has to guess which job a given update belongs to.
 JOB_MESSAGE_TYPES = {"transcript": "transcript_update", "summary": "summary_update"}
 
+# Placeholder written into _active_transcription_tasks/_active_summarization_tasks
+# by _reserve_slot, before a real asyncio.Task exists to put there -- see
+# _reserve_slot's docstring for why this is needed at all.
+_RESERVED = object()
+
 
 def truncate_transcript(transcript_text: str, max_chars: int = MAX_SUMMARY_TRANSCRIPT_CHARS) -> str:
     """Caps how much transcript text we hand a summarization/chat model in one
@@ -241,16 +246,61 @@ class TranscriptionOrchestrator:
             self.usage_store.record(operation=operation, history_id=history_id, **usage)
         except Exception:
             logger.exception("Failed to record AI usage for history entry %s", history_id)
+            return
+        # Signal-only (no payload) -- Insights re-fetches the authoritative
+        # aggregate from /usage(/dashboard) rather than the frontend trying to
+        # accumulate deltas client-side, which would drift from the server's
+        # real totals (especially across day boundaries for the trend chart).
+        # Covers every usage-recording path through this one shared method:
+        # transcribe_chunk, summarize, single-video chat, course chat, and
+        # course digest all call _record_usage, so this one broadcast is all
+        # that's needed for Insights to update live regardless of which
+        # feature just spent tokens.
+        self.broadcast({"type": "usage_recorded"})
+
+    # -- Shared reservation helpers --------------------------------------
+
+    def _reserve_slot(self, tasks: dict[int, asyncio.Task], history_id: int) -> bool:
+        """Shared by request_transcription/request_summarization. True (and
+        the slot immediately, synchronously reserved) if nothing is already
+        in flight or reserved for this History entry. Reserves right here,
+        rather than waiting for the eventual task's own first line to
+        self-register: asyncio.create_task() only *schedules* a coroutine,
+        it doesn't run any of it immediately, so relying on the task's first
+        line left a real window where a second synchronous caller in the
+        same event-loop tick (e.g. the auto-transcribe-on-download trigger
+        firing at the same moment as a manual Transcribe click) could slip
+        through undetected and start the same entry twice -- burning the
+        user's AI quota on a duplicate job. A caller that gets True back
+        and then does NOT end up creating a task (e.g. mark_*_running
+        raised) must call _release_slot, or the reservation blocks that
+        entry from ever being (re)started this session."""
+        task = tasks.get(history_id)
+        if task is _RESERVED:
+            return False
+        if task is not None and not task.done():
+            return False
+        tasks[history_id] = _RESERVED
+        return True
+
+    def _release_slot(self, tasks: dict[int, asyncio.Task], history_id: int) -> None:
+        if tasks.get(history_id) is _RESERVED:
+            tasks.pop(history_id, None)
 
     # -- Transcription --------------------------------------------------
 
     def request_transcription(self, history_id: int) -> bool:
-        """True if no transcription is already in flight for this History
-        entry. Doesn't itself reserve a slot -- transcribe_entry registers
-        itself as its very first line, before any await, so there's no
-        window for a second call in between to slip through."""
-        task = self._active_transcription_tasks.get(history_id)
-        return task is None or task.done()
+        """True if this call successfully reserved the transcription slot
+        for this History entry. See _reserve_slot -- callers that get True
+        must follow through with a task (transcribe_entry upgrades the
+        reservation to the real Task as its first line) or call
+        release_transcription() to give it back."""
+        return self._reserve_slot(self._active_transcription_tasks, history_id)
+
+    def release_transcription(self, history_id: int) -> None:
+        """Gives back a reservation from request_transcription() that the
+        caller didn't end up following through on."""
+        self._release_slot(self._active_transcription_tasks, history_id)
 
     def mark_transcription_running(self, history_id: int) -> Optional[dict]:
         """Broadcasts the "running" transition immediately when transcription
@@ -397,10 +447,15 @@ class TranscriptionOrchestrator:
     # -- Summarization ----------------------------------------------------
 
     def request_summarization(self, history_id: int) -> bool:
-        """True if no summarization is already in flight for this History
-        entry. Same registration pattern as request_transcription."""
-        task = self._active_summarization_tasks.get(history_id)
-        return task is None or task.done()
+        """True if this call successfully reserved the summarization slot
+        for this History entry. Same reservation pattern as
+        request_transcription -- see _reserve_slot."""
+        return self._reserve_slot(self._active_summarization_tasks, history_id)
+
+    def release_summarization(self, history_id: int) -> None:
+        """Gives back a reservation from request_summarization() that the
+        caller didn't end up following through on."""
+        self._release_slot(self._active_summarization_tasks, history_id)
 
     def mark_summarization_running(self, history_id: int) -> Optional[dict]:
         updated = self.history_store.update_summary(history_id, status="running")
@@ -503,5 +558,9 @@ class TranscriptionOrchestrator:
             return  # transcription failed (or the row is gone) -- nothing to summarize
         if not self.request_summarization(history_id):
             return
-        self.mark_summarization_running(history_id)
+        try:
+            self.mark_summarization_running(history_id)
+        except Exception:
+            self.release_summarization(history_id)
+            raise
         await self.summarize_entry(history_id)

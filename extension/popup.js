@@ -12,10 +12,49 @@ document.addEventListener("DOMContentLoaded", async () => {
   let videoSource   = null;
   let lessonTitle   = null;
   let courseName    = null;
+  let currentTabUrl = null;
 
   // ============================================================
   // HELPER FUNCTIONS
   // ============================================================
+
+  // Skool/Loom get content.js auto-injected on page load (see manifest.json's
+  // content_scripts), so it's already listening by the time this popup opens.
+  // Every other course/funnel platform (Teachable, Kajabi, Thinkific, Circle,
+  // Systeme.io, ClickFunnels, GHL, ...) runs on the creator's own custom
+  // domain, which a fixed manifest domain list can never fully cover -- so
+  // for those, inject content.js into just this one tab on demand instead,
+  // using the activeTab access granted the instant the toolbar button was
+  // clicked to open this popup. Falls back to injection only when the first
+  // send fails with "no listener," so an already-injected tab (Skool/Loom,
+  // or a repeat send within the same popup session) never gets injected twice.
+  async function sendMessageWithInjectionFallback(tabId, message) {
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (err) {
+      if (!String(err?.message || err).includes("Receiving end does not exist")) {
+        throw err;
+      }
+    }
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    } catch {
+      // Chrome blocks script injection into its own internal pages
+      // (chrome://, the Web Store, etc.) and a few other restricted
+      // contexts -- surface a clearer message than a generic scan failure
+      // for that specific, unfixable-by-retrying case.
+      throw new Error("CANNOT_SCAN_THIS_PAGE");
+    }
+    return chrome.tabs.sendMessage(tabId, message);
+  }
+
+  function tabOrigin(url) {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return null;
+    }
+  }
   function escapeHtml(str) {
     return String(str || "")
       .replace(/&/g, "&amp;")
@@ -209,7 +248,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     try {
       const [tab]  = await chrome.tabs.query({ active: true, currentWindow: true });
-      const result = await chrome.tabs.sendMessage(tab.id, { action: "getVideoLink" });
+      currentTabUrl = tab.url || null;
+      const result = await sendMessageWithInjectionFallback(tab.id, { action: "getVideoLink" });
 
       if (result?.link) {
         detectedLink = result.link;
@@ -318,11 +358,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     } catch (err) {
       console.error("Detection error:", err);
-      // This exact message means the content script in this tab is stale —
-      // usually because the extension was reloaded (e.g. after an update)
-      // while this tab was already open. Retrying the message won't help;
-      // only reloading the page re-injects a fresh content script.
-      if (String(err?.message || err).includes("Receiving end does not exist")) {
+      const message = String(err?.message || err);
+      if (message.includes("CANNOT_SCAN_THIS_PAGE")) {
+        statusEl.textContent = "⚠️ This page can't be scanned (browser/internal pages aren't supported).";
+      } else if (message.includes("Receiving end does not exist")) {
+        // This exact message means the content script in this tab is stale —
+        // usually because the extension was reloaded (e.g. after an update)
+        // while this tab was already open. Retrying the message won't help;
+        // only reloading the page re-injects a fresh content script.
         statusEl.textContent = "⚠️ Please refresh this page (F5) and try again — the extension was just reloaded.";
       } else {
         statusEl.textContent = "⚠️ Could not scan this page.";
@@ -346,7 +389,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     const resp = await chrome.runtime.sendMessage({
       type: "SEND_TO_CLIPPULL",
       url: detectedLink,
-      referer: "https://www.skool.com/",
+      // The actual page the video was found on -- was hardcoded to Skool's
+      // origin, which only ever happened to be correct because Skool was
+      // the only supported site. Any other platform (or a manually pasted
+      // URL, where there's no real referring page) needs its own real
+      // origin instead, or none at all.
+      referer: tabOrigin(currentTabUrl),
       subfolder: courseName || null,
     });
 

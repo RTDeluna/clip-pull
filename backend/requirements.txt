@@ -1,6 +1,11 @@
-fastapi>=0.115
-uvicorn[standard]>=0.34
-yt-dlp>=2024.12.0
-curl_cffi>=0.5.10
-pytest>=8.3
-httpx>=0.28
+# Pinned to exact versions (not floors) so what gets built into a release
+# is reproducible and auditable after the fact -- bump deliberately via a
+# normal PR, not silently on the next `pip install`. yt-dlp specifically
+# needs bumping often since site extractors break upstream; the others can
+# stay put unless there's a reason to move.
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+yt-dlp==2026.6.9
+curl_cffi==0.15.0
+pytest==9.1.1
+httpx==0.28.1

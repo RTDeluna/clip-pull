@@ -1,7 +1,9 @@
-# Builds a clean, loadable package of the Skool Video Downloader extension
-# and drops it into assets/extension/, where Clip.Pull's Extension tab (via
-# the get-extension-package-info / save-extension-package IPC handlers) and
-# electron-builder's "assets/**/*" files allowlist both pick it up.
+# Builds a clean, loadable package of the CLIP.PULL Course Downloader
+# extension and drops it into assets/extension/, where Clip.Pull's Extension
+# tab (via the get-extension-package-info / save-extension-package IPC
+# handlers) and electron-builder's "assets/**/*" files allowlist both pick
+# it up. findExtensionZip() (main.js) matches any *.zip in that folder, so
+# this filename isn't load-bearing -- it's just for humans browsing the dir.
 # Includes only the files the extension needs — no docs, git, or OS junk.
 # Entry paths use forward slashes (ZIP spec / Chrome requirement).
 $ErrorActionPreference = "Stop"
@@ -15,7 +17,7 @@ $extRoot    = Join-Path $repoRoot "extension"
 $manifest = Get-Content "$extRoot\manifest.json" -Raw | ConvertFrom-Json
 $version  = $manifest.version
 $distDir  = Join-Path $repoRoot "assets\extension"
-$zipPath  = Join-Path $distDir "skool-video-downloader-$version.zip"
+$zipPath  = Join-Path $distDir "clippull-course-downloader-$version.zip"
 
 # Exact file list that makes up the shippable extension
 $files = @(

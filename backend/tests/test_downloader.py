@@ -5,12 +5,14 @@ from collections import namedtuple
 from pathlib import Path
 from unittest.mock import patch
 
-from history_store import HistoryStore
-from queue_manager import QueueManager
+import pytest
+
 from downloader import (
     CONCURRENT_FRAGMENT_DOWNLOADS,
+    GENERIC_ERROR_MESSAGE,
     REFERER_BLOCKED_MESSAGE,
     DownloadOrchestrator,
+    DownloadPaused,
     build_ydl_opts,
     check_aria2c_available,
     check_ffmpeg_available,
@@ -18,14 +20,19 @@ from downloader import (
     format_speed,
     get_bundled_ffmpeg_path,
     humanize_error_reason,
+    is_auto_retryable_error,
+    is_dangerous_output_folder,
     is_referer_blocked_error,
     probe_total_bytes,
     resolve_output_folder,
     resolve_use_aria2c,
+    run_download,
     sanitize_filename,
     select_format,
     stream_stage,
 )
+from history_store import HistoryStore
+from queue_manager import QueueManager
 
 
 def test_sanitize_filename_replaces_illegal_characters():
@@ -136,11 +143,22 @@ def test_humanize_error_reason_rewrites_network_errors():
     assert "Couldn't reach the video server" in reason
 
 
-def test_humanize_error_reason_strips_ansi_codes_for_unmapped_errors():
+def test_humanize_error_reason_never_shows_raw_text_for_unmapped_errors():
+    # Users should never see raw/developer-facing error text -- an error
+    # that doesn't match any friendly rule (even one carrying terminal ANSI
+    # codes) falls back to the same generic, actionable message instead of
+    # passing the raw exception text through.
     exc = Exception("\x1b[0;31mERROR:\x1b[0m Something unexpected happened")
     reason = humanize_error_reason(exc)
+    assert reason == GENERIC_ERROR_MESSAGE
     assert "\x1b" not in reason
-    assert reason == "ERROR: Something unexpected happened"
+    assert "Something unexpected happened" not in reason
+
+
+def test_humanize_error_reason_falls_back_to_generic_message_for_blank_errors():
+    # Some exceptions stringify to nothing at all (e.g. a bare raise with no
+    # message) -- must still get an actionable message, not a blank reason.
+    assert humanize_error_reason(Exception("")) == GENERIC_ERROR_MESSAGE
 
 
 def test_humanize_error_reason_rewrites_path_too_long_errors():
@@ -153,7 +171,8 @@ def test_humanize_error_reason_rewrites_path_too_long_errors():
 def test_humanize_error_reason_does_not_confuse_generic_path_not_found_with_too_long():
     # WinError 3 (path not found) is deliberately NOT treated as "too long" -
     # it's ambiguous (could be a deleted/missing folder instead), so it falls
-    # through to the raw message rather than risk misdiagnosing the cause.
+    # through to the generic fallback message rather than risk misdiagnosing
+    # the cause with a specific-but-possibly-wrong rule.
     exc = Exception("[WinError 3] The system cannot find the path specified: 'C:\\gone'")
     reason = humanize_error_reason(exc)
     assert "too long for" not in reason
@@ -419,11 +438,12 @@ def test_progress_hook_produces_clean_speed_and_integer_eta():
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         calls.append((percent, speed, eta, downloaded_size, total_size, speed_bytes))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = capturing_update_progress
@@ -473,11 +493,12 @@ def test_download_entry_final_update_clears_size_fields_like_speed_and_eta():
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         calls.append((percent, speed, eta, downloaded_size, total_size, speed_bytes))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = capturing_update_progress
@@ -599,11 +620,12 @@ def test_progress_hook_throttles_rapid_updates():
     original_update_progress = manager.update_progress
 
     def counting_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         call_count["n"] += 1
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = counting_update_progress
@@ -809,11 +831,12 @@ def test_progress_hook_computes_weighted_percent_across_two_streams_when_probe_a
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         calls.append((percent, downloaded_size, total_size))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = capturing_update_progress
@@ -858,11 +881,12 @@ def test_progress_hook_tracks_cumulative_percent_and_size_across_streams_when_pr
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         calls.append((percent, downloaded_size, total_size))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = capturing_update_progress
@@ -911,11 +935,12 @@ def test_progress_hook_does_not_inflate_total_when_estimate_fluctuates_within_on
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         calls.append((downloaded_size, total_size))
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = capturing_update_progress
@@ -991,11 +1016,12 @@ def test_progress_hook_falls_back_when_probe_fn_returns_none():
     original_update_progress = manager.update_progress
 
     def capturing_update_progress(
-        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
     ):
         calls.append(percent)
         original_update_progress(
-            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
         )
 
     manager.update_progress = capturing_update_progress
@@ -1011,6 +1037,46 @@ def test_progress_hook_falls_back_when_probe_fn_returns_none():
 
     # Last entry is the orchestrator's own unconditional 100%-complete call.
     assert calls == [25.0, 100.0]
+
+
+def test_progress_hook_flags_size_unknown_when_total_never_available():
+    # Some fragmented/HLS formats never report total_bytes or
+    # total_bytes_estimate at all, and there's no upfront probe either --
+    # real bytes are still flowing, so this must not just silently read as
+    # "stuck at 0%." percent stays 0.0 (unknowable as a fraction), but
+    # size_unknown flags it so the frontend can show an honest indeterminate
+    # state instead of a frozen bar.
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    calls = []
+    original_update_progress = manager.update_progress
+
+    def capturing_update_progress(
+        entry_id, percent, speed, eta, downloaded_size=None, total_size=None, speed_bytes=None,
+        size_unknown=False,
+    ):
+        calls.append((percent, downloaded_size, total_size, size_unknown))
+        original_update_progress(
+            entry_id, percent, speed, eta, downloaded_size, total_size, speed_bytes, size_unknown
+        )
+
+    manager.update_progress = capturing_update_progress
+
+    def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        progress_hook({"status": "downloading", "downloaded_bytes": 500})
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=fake_download, probe_fn=lambda url, referer: None
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # First call is from progress_hook itself; the orchestrator's own
+    # unconditional 100%-complete call follows (size_unknown resets to False
+    # there, since the download is finished and the flag is moot by then).
+    hook_call = calls[0]
+    assert hook_call == (0.0, "500B", None, True)
 
 
 def test_progress_hook_reports_video_then_audio_stage_across_stream_transition():
@@ -1114,6 +1180,42 @@ def test_download_all_never_exceeds_max_concurrency():
     assert all(manager.get(e.id).status == "done" for e in entries)
 
 
+def test_download_all_shares_concurrency_cap_across_separate_calls():
+    """Regression test: a Retry/Resume click (its own download_all call --
+    see queue_routes.py) firing while a batch is already using its full
+    concurrency allotment must not push real concurrency past
+    max_concurrent_downloads. Previously each download_all call built its
+    own fresh Semaphore, so two calls running at once could each reach the
+    limit independently, silently doubling real concurrency."""
+    manager = QueueManager()
+    batch_entries = manager.add_entries([f"https://vimeo.com/batch-{i}" for i in range(3)])
+    retry_entries = manager.add_entries([f"https://vimeo.com/retry-{i}" for i in range(3)])
+    counter_lock = threading.Lock()
+    counters = {"active": 0, "peak": 0}
+
+    def slow_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        with counter_lock:
+            counters["active"] += 1
+            counters["peak"] = max(counters["peak"], counters["active"])
+        time.sleep(0.05)
+        with counter_lock:
+            counters["active"] -= 1
+        return {"title": "x"}
+
+    orchestrator = DownloadOrchestrator(manager, max_concurrent=2, download_fn=slow_download)
+
+    async def run_both():
+        await asyncio.gather(
+            orchestrator.download_all([e.id for e in batch_entries], "/tmp/out"),
+            orchestrator.download_all([e.id for e in retry_entries], "/tmp/out"),
+        )
+
+    asyncio.run(run_both())
+
+    assert counters["peak"] == 2
+    assert all(manager.get(e.id).status == "done" for e in batch_entries + retry_entries)
+
+
 def test_resolve_use_aria2c_true_when_enabled_and_available():
     with patch("shutil.which", return_value="C:/aria2/aria2c.exe"):
         assert resolve_use_aria2c(True) is True
@@ -1173,7 +1275,9 @@ def test_download_all_resolves_max_concurrent_from_callable_once_per_call():
 
 def test_download_entry_records_history_on_success():
     manager = QueueManager()
-    [entry] = manager.add_entries(["https://vimeo.com/111"], batch_id="b1")
+    [entry] = manager.add_entries(
+        ["https://vimeo.com/111"], batch_id="b1", output_folder="C:/downloads/course-a"
+    )
     recorded = []
 
     def fake_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
@@ -1196,11 +1300,14 @@ def test_download_entry_records_history_on_success():
     assert recorded[0]["output_path"] == "C:/out/Lesson 1.mp4"
     assert recorded[0]["total_size"] == "100B"
     assert recorded[0]["batch_id"] == "b1"
+    assert recorded[0]["output_folder"] == "C:/downloads/course-a"
 
 
 def test_download_entry_records_history_on_error():
     manager = QueueManager()
-    [entry] = manager.add_entries(["https://vimeo.com/111"])
+    [entry] = manager.add_entries(
+        ["https://vimeo.com/111"], output_folder="C:/downloads/course-a"
+    )
     recorded = []
 
     def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
@@ -1216,6 +1323,10 @@ def test_download_entry_records_history_on_error():
     assert len(recorded) == 1
     assert recorded[0]["status"] == "error"
     assert "referer" in recorded[0]["error_reason"].lower()
+    # This is the whole point: output_folder must survive a failure (unlike
+    # output_path, which is None here since no file was ever written) so a
+    # History-tab retry can reuse the exact same destination folder.
+    assert recorded[0]["output_folder"] == "C:/downloads/course-a"
 
 
 def test_download_entry_updates_same_history_row_when_retried_with_same_entry_id():
@@ -1418,6 +1529,145 @@ def test_auto_removal_does_not_yank_an_entry_retried_during_the_delay_window():
     assert manager.get(entry.id).status == "queued"
 
 
+def test_is_auto_retryable_error_flags_transient_failures():
+    assert is_auto_retryable_error(Exception("HTTP Error 503: Service Unavailable")) is True
+    assert is_auto_retryable_error(Exception("Read timed out")) is True
+    assert is_auto_retryable_error(
+        Exception("[WinError 32] The process cannot access the file because it is being used")
+    ) is True
+
+
+def test_is_auto_retryable_error_excludes_permanent_failures():
+    # Retrying any of these with identical inputs seconds later can't
+    # succeed -- disk space doesn't free itself, DRM doesn't lift, and a
+    # referer block needs the user to actually supply a different referer.
+    assert is_auto_retryable_error(Exception("HTTP Error 403: Forbidden")) is False
+    assert is_auto_retryable_error(Exception("ERROR: This video is DRM protected")) is False
+    assert is_auto_retryable_error(Exception("[WinError 112] There is not enough space on the disk")) is False
+    assert is_auto_retryable_error(Exception("Something completely unrecognized happened")) is False
+
+
+def test_download_entry_auto_retries_a_transient_error_and_succeeds():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    call_count = {"n": 0}
+
+    def flaky_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise Exception("HTTP Error 503: Service Unavailable")
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=flaky_download, auto_retry_base_delay=0
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert call_count["n"] == 2
+    updated = manager.get(entry.id)
+    assert updated.status == "done"
+    assert updated.title == "Lesson 1"
+
+
+def test_download_entry_shows_retrying_stage_during_auto_retry():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    stages = []
+    original_set_stage = manager.set_stage
+
+    def capturing_set_stage(entry_id, stage):
+        stages.append(stage)
+        original_set_stage(entry_id, stage)
+
+    manager.set_stage = capturing_set_stage
+
+    call_count = {"n": 0}
+
+    def flaky_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise Exception("Read timed out")
+        return {"title": "Lesson 1"}
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=flaky_download, auto_retry_base_delay=0
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    assert "retrying" in stages
+
+
+def test_download_entry_gives_up_after_max_auto_retry_attempts():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    call_count = {"n": 0}
+
+    def always_flaky_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        call_count["n"] += 1
+        raise Exception("HTTP Error 503: Service Unavailable")
+
+    orchestrator = DownloadOrchestrator(
+        manager,
+        download_fn=always_flaky_download,
+        auto_retry_base_delay=0,
+        auto_retry_max_attempts=3,
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # The initial attempt plus exactly 2 automatic retries -- never
+    # unbounded, and the entry still ends up as a normal, manually-retryable
+    # error once attempts are exhausted.
+    assert call_count["n"] == 3
+    updated = manager.get(entry.id)
+    assert updated.status == "error"
+    assert "temporary problem" in updated.error_reason
+
+
+def test_download_entry_does_not_auto_retry_a_non_retryable_error():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    call_count = {"n": 0}
+
+    def failing_download(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        call_count["n"] += 1
+        raise Exception("ERROR: This video is DRM protected")
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=failing_download, auto_retry_base_delay=0
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # Not auto-retryable -- fails immediately on the first attempt, no
+    # pointless extra attempts against an error that can't ever succeed.
+    assert call_count["n"] == 1
+    assert manager.get(entry.id).status == "error"
+
+
+def test_download_entry_does_not_auto_retry_a_paused_download():
+    manager = QueueManager()
+    [entry] = manager.add_entries(["https://vimeo.com/111"])
+
+    call_count = {"n": 0}
+
+    def fake_download_pauses(url, output_folder, referer, progress_hook, concurrent_fragment_downloads=8, aria2c_enabled=True):
+        call_count["n"] += 1
+        raise DownloadPaused()
+
+    orchestrator = DownloadOrchestrator(
+        manager, download_fn=fake_download_pauses, auto_retry_base_delay=0
+    )
+    asyncio.run(orchestrator.download_entry(entry.id, "/tmp/out"))
+
+    # A pause is user-initiated -- must never be treated as a transient
+    # failure worth auto-retrying past.
+    assert call_count["n"] == 1
+    assert manager.get(entry.id).status == "paused"
+
+
 def test_request_pause_returns_false_when_entry_not_currently_downloading():
     manager = QueueManager()
     [entry] = manager.add_entries(["https://vimeo.com/111"])
@@ -1508,3 +1758,27 @@ def test_resolve_output_folder_returns_base_unchanged_when_subfolder_none():
 
 def test_resolve_output_folder_returns_base_unchanged_when_subfolder_blank():
     assert resolve_output_folder("C:/downloads", "   ") == "C:/downloads"
+
+
+def test_is_dangerous_output_folder_rejects_startup_folder(monkeypatch, tmp_path):
+    appdata = tmp_path / "AppData" / "Roaming"
+    appdata.mkdir(parents=True)
+    monkeypatch.setenv("APPDATA", str(appdata))
+    startup = appdata / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    assert is_dangerous_output_folder(str(startup)) is True
+    assert is_dangerous_output_folder(str(startup / "subdir")) is True
+
+
+def test_is_dangerous_output_folder_allows_ordinary_downloads_folder(tmp_path):
+    downloads = tmp_path / "Downloads" / "Course 1"
+    downloads.mkdir(parents=True)
+    assert is_dangerous_output_folder(str(downloads)) is False
+
+
+def test_run_download_rejects_url_starting_with_dash(tmp_path):
+    # Would otherwise be parsed as a flag rather than a positional URL
+    # argument if handed to aria2c (yt-dlp's external_downloader) --
+    # rejected before yt-dlp is ever touched, not just relying on
+    # is_supported_url staying strict at submission time.
+    with pytest.raises(ValueError):
+        run_download("-x16", str(tmp_path), None, lambda d: None)

@@ -26,6 +26,7 @@ class SettingsUpdateRequest(BaseModel):
     summarization_provider: Optional[Literal[tuple(SUMMARIZATION_CLIENTS)]] = None
     auto_transcribe_on_download: Optional[bool] = None
     auto_summarize_after_transcribe: Optional[bool] = None
+    time_saved_hourly_rate: Optional[float] = Field(None, ge=0)
 
 
 def build_settings_router(settings_store: SettingsStore) -> APIRouter:

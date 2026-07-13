@@ -115,6 +115,10 @@ def build_transcription_router(
         try:
             updated = transcription_orchestrator.mark_transcription_running(entry_id)
         except sqlite3.OperationalError:
+            # Give back the slot request_transcription() just reserved --
+            # otherwise this entry is stuck "already being transcribed"
+            # forever, since no task is ever created to release it.
+            transcription_orchestrator.release_transcription(entry_id)
             raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
 
         def _on_transcription_death(_exc: BaseException) -> None:
@@ -165,6 +169,9 @@ def build_transcription_router(
         try:
             updated = transcription_orchestrator.mark_summarization_running(entry_id)
         except sqlite3.OperationalError:
+            # Same reasoning as start_transcription above -- release the
+            # reservation before this route errors out, or it never clears.
+            transcription_orchestrator.release_summarization(entry_id)
             raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
 
         def _on_summarization_death(_exc: BaseException) -> None:
@@ -316,6 +323,7 @@ def build_transcription_router(
             try:
                 transcription_orchestrator.mark_transcription_running(entry_id)
             except sqlite3.OperationalError:
+                transcription_orchestrator.release_transcription(entry_id)
                 raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
             track_task(
                 asyncio.create_task(

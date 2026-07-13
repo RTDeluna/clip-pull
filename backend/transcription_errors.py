@@ -8,6 +8,16 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 def is_retryable(exc: AIClientError) -> bool:
+    # A plain connection failure (DNS, refused, dropped mid-request before
+    # any response) never reached the provider, so retrying is free -- but a
+    # timeout is ambiguous: the provider may have already received and
+    # started (or finished) processing/billing the request before the
+    # client gave up waiting. Auto-retrying that risks re-billing the
+    # user's own API key for the same audio/transcript, so a timeout is
+    # deliberately excluded here and left for the user to retry manually
+    # (see humanize_transcription_error's message for this case).
+    if exc.timed_out:
+        return False
     return exc.status_code is None or exc.status_code in RETRYABLE_STATUS_CODES
 
 
@@ -42,6 +52,11 @@ def humanize_transcription_error(exc: Exception) -> str:
             return "This audio was too large for the transcription service, even after compression."
         if exc.status_code is not None and 500 <= exc.status_code < 600:
             return f"{provider_name} had a temporary problem. Wait a moment and hit Retry."
+        if exc.timed_out:
+            return (
+                f"{provider_name} took too long to respond. It may have still processed this "
+                "request on its end -- wait a minute before hitting Retry to avoid being billed twice."
+            )
         if exc.status_code is None:
             return f"Couldn't reach {provider_name} — check your internet connection and hit Retry."
         return f"{provider_name} rejected the request ({exc.status_code})."

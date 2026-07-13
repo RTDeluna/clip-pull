@@ -15,6 +15,11 @@ class QueueEntry:
     eta: Optional[int] = None
     downloaded_size: Optional[str] = None
     total_size: Optional[str] = None
+    # True while actively downloading real bytes whose total size yt-dlp
+    # can't determine (common for some fragmented/HLS streams) -- lets the
+    # frontend show an honest indeterminate bar instead of a percent frozen
+    # at 0%, which otherwise reads as a stuck/broken download.
+    size_unknown: bool = False
     stage: Optional[str] = None
     error_reason: Optional[str] = None
     retry_count: int = 0
@@ -40,6 +45,7 @@ class QueueEntry:
             "eta": self.eta,
             "downloaded_size": self.downloaded_size,
             "total_size": self.total_size,
+            "size_unknown": self.size_unknown,
             "stage": self.stage,
             "error_reason": self.error_reason,
             "retry_count": self.retry_count,
@@ -137,6 +143,7 @@ class QueueManager:
         downloaded_size: Optional[str] = None,
         total_size: Optional[str] = None,
         speed_bytes: Optional[float] = None,
+        size_unknown: bool = False,
     ) -> None:
         entry = self._entries[entry_id]
         entry.percent = percent
@@ -145,6 +152,7 @@ class QueueManager:
         entry.eta = eta
         entry.downloaded_size = downloaded_size
         entry.total_size = total_size
+        entry.size_unknown = size_unknown
         self._notify(entry)
 
     def set_stage(self, entry_id: str, stage: Optional[str]) -> None:
@@ -214,6 +222,7 @@ class QueueManager:
         entry.eta = None
         entry.downloaded_size = None
         entry.total_size = None
+        entry.size_unknown = False
         entry.stage = None
         entry.error_reason = None
         entry.retry_count += 1

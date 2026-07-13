@@ -4,6 +4,25 @@ import { showToast } from "./toast.js";
 const BACKEND_PORT = window.api?.backendPort ?? 8934;
 const API_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
 
+// A brief backend hiccup right after launch (see prefillDefaultOutputFolder's
+// comment below about the packaged app's PyInstaller cold-start race) can
+// make a single fetch attempt fail even though the backend is about to be
+// ready -- retrying a couple of times with a short delay covers that window
+// without requiring the user to notice and click Retry/Resume again
+// themselves. Only retries a genuine network-level failure (fetch itself
+// throwing); an HTTP error response (4xx/5xx) is a real answer from a
+// reachable backend and is returned as-is, not retried.
+async function fetchWithRetry(url, options, attempts = 3, delayMs = 600) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 const urlsInput = document.getElementById("urls");
 const urlsGutter = document.getElementById("urls-gutter");
 const invalidLinesEl = document.getElementById("invalid-lines");
@@ -34,6 +53,10 @@ const STAGE_LABELS = {
   video: "Downloading video…",
   audio: "Downloading audio…",
   merging: "Merging video + audio…",
+  // Set while the backend is waiting out a backoff delay before an
+  // automatic retry of a transient failure (network blip, temporary server
+  // error) -- so a brief stall reads as "recovering," not "stuck."
+  retrying: "Hit a snag — retrying…",
 };
 
 function stageLabel(entry) {
@@ -63,6 +86,12 @@ function formatEta(eta) {
 
 function formatSizeLine(entry, displayPercent) {
   const downloaded = entry.downloaded_size || "--";
+  // Some fragmented/HLS streams never report a total size -- real bytes are
+  // still flowing (downloaded keeps climbing), but "X / -- · 0%" reads as a
+  // stuck download. Drop the total/percent instead of showing a fake 0%.
+  if (entry.status === "downloading" && entry.size_unknown) {
+    return `${downloaded} downloaded`;
+  }
   const total = entry.total_size || "--";
   return `${downloaded} / ${total} · ${Math.round(displayPercent)}%`;
 }
@@ -208,6 +237,10 @@ function renderRow(entry, { announceCompletion = true } = {}) {
 
   row.classList.toggle("queue-row--downloading", entry.status === "downloading");
   row.style.setProperty("--shimmer-duration", `${shimmerDurationForSpeed(entry.speed_bytes)}s`);
+  row.querySelector(".progress-track").classList.toggle(
+    "progress-track--indeterminate",
+    entry.status === "downloading" && Boolean(entry.size_unknown)
+  );
 
   const titleText = entry.title || entry.url;
   const titleEl = row.querySelector(".queue-row__title");
@@ -235,10 +268,15 @@ function renderRow(entry, { announceCompletion = true } = {}) {
     // up from 0, and state changes (done/error/paused/reset to queued)
     // should read as immediate, not smoothed away.
     state.displayedPercent = displayPercent;
-    applyDisplayedPercent(state);
   } else {
     ensureProgressAnimation();
   }
+  // Always refresh here, not just from the easing loop above: the loop only
+  // repaints when displayedPercent is still catching up to a *changed*
+  // target, so a size-unknown download (percent pinned at 0 the whole time,
+  // see formatSizeLine) would otherwise never repaint its "X downloaded"
+  // text as more bytes arrive, even though real progress is happening.
+  applyDisplayedPercent(state);
   row.querySelector(".queue-row__speed").textContent = formatSpeed(entry.speed);
   row.querySelector(".queue-row__eta").textContent = formatEta(entry.eta);
 
@@ -279,6 +317,39 @@ function removeRow(entryId) {
 
   state.el.classList.add("queue-row--leaving");
   state.el.addEventListener("animationend", () => state.el.remove(), { once: true });
+}
+
+// Skeleton placeholders shaped like a real .queue-row, shown from page load
+// until the first WebSocket "sync" resolves (or the connection-error banner
+// takes over), so the queue never sits blank during that initial unknown
+// window. clearQueueSkeletons is idempotent — safe to call once the first
+// sync lands and again on any later disconnect.
+function renderQueueSkeletons(count = 3) {
+  // Guards against duplicate rows if this is ever called a second time
+  // before clearQueueSkeletons runs (not reachable today -- only one call
+  // site -- but cheap to make safe against a future reconnect wiring).
+  if (queueList.querySelector(".queue-row--skeleton")) return;
+  const titleWidths = ["60%", "48%", "54%"];
+  const fragment = document.createDocumentFragment();
+  for (let i = 0; i < count; i += 1) {
+    const li = document.createElement("li");
+    li.className = "queue-row queue-row--skeleton";
+    li.setAttribute("aria-hidden", "true");
+    li.innerHTML = `
+      <div class="queue-row__top">
+        <span class="skeleton skeleton--line" style="width: ${titleWidths[i % titleWidths.length]}"></span>
+        <span class="skeleton skeleton--pill" style="width: 62px"></span>
+      </div>
+      <span class="skeleton skeleton--bar"></span>
+      <span class="skeleton skeleton--line" style="width: 40%; margin-top: 12px"></span>
+    `;
+    fragment.appendChild(li);
+  }
+  queueList.appendChild(fragment);
+}
+
+function clearQueueSkeletons() {
+  queueList.querySelectorAll(".queue-row--skeleton").forEach((el) => el.remove());
 }
 
 // A full resync with the backend's current queue state — unlike the
@@ -348,13 +419,14 @@ renderGutter();
 async function retryEntry(entryId, button) {
   if (button) button.disabled = true;
   try {
-    const response = await fetch(`${API_BASE}/queue/${entryId}/retry`, {
+    const response = await fetchWithRetry(`${API_BASE}/queue/${entryId}/retry`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ referer: refererInput.value || null }),
     });
     if (!response.ok) {
-      showToast("Failed to queue this retry.", "error");
+      const body = await response.json().catch(() => null);
+      showToast(body?.detail || "Failed to queue this retry.", "error");
       return;
     }
     showToast("Queued for retry", "success");
@@ -384,13 +456,14 @@ async function pauseEntry(entryId, button) {
 async function resumeEntry(entryId, button) {
   if (button) button.disabled = true;
   try {
-    const response = await fetch(`${API_BASE}/queue/${entryId}/resume`, {
+    const response = await fetchWithRetry(`${API_BASE}/queue/${entryId}/resume`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ referer: refererInput.value || null }),
     });
     if (!response.ok) {
-      showToast("Failed to resume this download.", "error");
+      const body = await response.json().catch(() => null);
+      showToast(body?.detail || "Failed to resume this download.", "error");
       return;
     }
     showToast("Resumed", "success");
@@ -562,6 +635,11 @@ startBtn.addEventListener("click", async () => {
   }
 });
 
+// Fill the queue with skeleton rows up front so it isn't blank during the
+// initial-connection window before the first "sync" arrives (cleared in the
+// sync handler below, or on a disconnect if the backend never comes up).
+renderQueueSkeletons();
+
 // Distinguishes a genuine drop (show "reconnecting…") from a first-launch
 // attempt that hasn't connected yet (show "connecting…") in the banner below.
 let hasEverConnected = false;
@@ -569,6 +647,7 @@ let hasEverConnected = false;
 connectQueueSocket(
   (event) => {
     if (event.type === "sync") {
+      clearQueueSkeletons();
       event.entries.forEach((entry) => renderRow(entry, { announceCompletion: false }));
     } else if (event.type === "update_batch") {
       event.entries.forEach(renderRow);
@@ -599,6 +678,9 @@ connectQueueSocket(
     // "reconnecting…" only makes sense once we've actually been connected;
     // on a first-launch attempt that never succeeded yet, it's just connecting.
     if (status === "disconnected") {
+      // The banner is now the loading affordance — drop any initial skeletons
+      // so they don't sit stacked underneath it while the backend is down.
+      clearQueueSkeletons();
       connectionBanner.textContent = hasEverConnected
         ? "Lost connection to CLIP.PULL's backend — reconnecting…"
         : "Connecting to CLIP.PULL's backend…";

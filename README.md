@@ -1,6 +1,6 @@
 # CLIP.PULL
 
-Paste video links, pick a folder, and download them in parallel with live progress bars. Built on [yt-dlp](https://github.com/yt-dlp/yt-dlp), CLIP.PULL is a desktop app (Windows/macOS) for saving course videos hosted on Vimeo, Loom, and similar platforms — plus a companion Chrome extension that auto-detects videos on Skool lesson pages and sends them straight into the app.
+Paste video links, pick a folder, and download them in parallel with live progress bars. Built on [yt-dlp](https://github.com/yt-dlp/yt-dlp), CLIP.PULL is a desktop app (Windows/macOS) for saving course videos hosted on Vimeo, Loom, and similar platforms — plus a companion Chrome extension that auto-detects videos on course lesson pages (Skool, Loom, Teachable, Kajabi, Thinkific, Circle, and most other course/funnel sites) and sends them straight into the app.
 
 ---
 
@@ -14,7 +14,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 - [The Queue tab](#the-queue-tab)
 - [The History tab](#the-history-tab)
 - [The Settings tab](#the-settings-tab)
-- [The Extension tab (Skool Video Downloader)](#the-extension-tab-skool-video-downloader)
+- [The Extension tab (CLIP.PULL Course Downloader)](#the-extension-tab-clippull-course-downloader)
 - [Tips & troubleshooting](#tips--troubleshooting)
 - [Running from source / building installers](#running-from-source--building-installers)
 - [Third-party software](#third-party-software)
@@ -28,7 +28,7 @@ Paste video links, pick a folder, and download them in parallel with live progre
 - Remembers every completed and failed download in a searchable **History** tab, with one click to reveal the file in your file explorer or retry a failed one.
 - Supports a **referer domain** for videos that are embedded on a course site and reject direct requests without it.
 - Detects links you've already downloaded and asks whether to skip or re-queue them.
-- Ships a Chrome extension that watches Skool lesson pages (and Loom pages) for a playable video — Skool Native (Mux), YouTube, Vimeo, Loom, Wistia, or Bunny Stream — and sends it to CLIP.PULL's queue with one click, no copy-pasting required.
+- Ships a Chrome extension that watches Skool and Loom pages automatically, and can scan any other course/funnel page (Teachable, Kajabi, Thinkific, Circle, Systeme.io, ClickFunnels, GHL, and more) on demand with one click, for a playable video — Skool Native (Mux), YouTube, Vimeo, Loom, Wistia, or Bunny Stream — and sends it to CLIP.PULL's queue with no copy-pasting required.
 
 ## Supported sites
 
@@ -107,9 +107,9 @@ Every completed or failed download lands here, grouped by date (Today, Yesterday
 
 Click **Save Settings** to apply changes.
 
-## The Extension tab (Skool Video Downloader)
+## The Extension tab (CLIP.PULL Course Downloader)
 
-A companion Chrome extension that watches Skool lesson pages and Loom pages, and sends whatever video it finds straight to CLIP.PULL's queue — no copying links by hand.
+A companion Chrome extension that watches Skool and Loom pages automatically, and can scan any other course/funnel page on demand (Teachable, Kajabi, Thinkific, Circle, Systeme.io, ClickFunnels, GHL, and effectively any other course site) — sending whatever video it finds straight to CLIP.PULL's queue, no copying links by hand.
 
 **Setup:**
 
@@ -122,8 +122,8 @@ A companion Chrome extension that watches Skool lesson pages and Loom pages, and
 **Using it:**
 
 1. Make sure CLIP.PULL is running and a **Default output folder** is set in Settings — the extension needs both to hand off a link.
-2. Visit a Skool lesson page or a Loom page with a video.
-3. Click the extension icon (or use its detection on the page) to send the video to CLIP.PULL.
+2. Visit a course lesson page with a video — Skool and Loom are detected automatically; any other site (Teachable, Kajabi, Thinkific, Circle, Systeme.io, ClickFunnels, GHL, etc.) is scanned the moment you click the icon.
+3. Click the extension icon to send the video to CLIP.PULL.
 4. Switch to CLIP.PULL's **Queue** tab to watch it download. You'll also get a browser notification confirming it was sent.
 
 If the extension can't reach CLIP.PULL, make sure the app is open — it talks to the app over `http://127.0.0.1:8934`, so nothing leaves your machine.

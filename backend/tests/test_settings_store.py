@@ -18,6 +18,7 @@ def test_get_returns_defaults_when_no_row_exists_yet():
     assert settings["summarization_provider"] == "anthropic"
     assert settings["auto_transcribe_on_download"] is False
     assert settings["auto_summarize_after_transcribe"] is False
+    assert settings["time_saved_hourly_rate"] is None
 
 
 def test_update_persists_auto_process_toggles():
@@ -81,6 +82,13 @@ def test_update_ignores_none_values():
     store.update(max_concurrent_downloads=5)
     store.update(max_concurrent_downloads=None)
     assert store.get()["max_concurrent_downloads"] == 5
+
+
+def test_update_persists_time_saved_hourly_rate():
+    store = SettingsStore()
+    updated = store.update(time_saved_hourly_rate=45.5)
+    assert updated["time_saved_hourly_rate"] == 45.5
+    assert store.get()["time_saved_hourly_rate"] == 45.5
 
 
 def test_settings_persist_across_store_instances_pointing_at_same_file(tmp_path):

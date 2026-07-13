@@ -6,11 +6,33 @@ import { showConfirmModal } from "./confirm-modal.js";
 const BACKEND_PORT = window.api?.backendPort ?? 8934;
 const API_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
 
+// A brief backend hiccup right after launch (see prefillDefaultOutputFolder
+// in renderer.js) can make a single fetch attempt fail even though the
+// backend is about to be ready -- retrying a couple of times with a short
+// delay covers that window without requiring the user to click Retry again
+// themselves. Only retries a genuine network-level failure (fetch itself
+// throwing); an HTTP error response (4xx/5xx) is a real answer from a
+// reachable backend and is returned as-is, not retried. Duplicated (not
+// imported) from renderer.js's identical helper -- this app has no
+// shared-code mechanism between view modules, so a small duplicate is the
+// pragmatic choice here, same as PROVIDER_DISPLAY_NAMES below.
+async function fetchWithRetry(url, options, attempts = 3, delayMs = 600) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 const searchInput = document.getElementById("history-search");
 const statusFilter = document.getElementById("history-status-filter");
 const historyList = document.getElementById("history-list");
 const historySummary = document.getElementById("history-summary");
 const clearBtn = document.getElementById("history-clear-btn");
+const retryFailedBtn = document.getElementById("history-retry-failed-btn");
 const refreshBtn = document.getElementById("history-refresh-btn");
 const batchBtn = document.getElementById("history-batch-btn");
 const batchSummarizeInput = document.getElementById("history-batch-summarize");
@@ -34,6 +56,32 @@ const SEARCH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 // summary_update WS events patch one row's live status/content in place
 // instead of forcing a full loadHistory() refetch on every progress tick.
 const transcriptRows = new Map();
+
+// The History list can grow into the hundreds after months of use, and
+// building every row's DOM up front (each with collapsible summary/
+// transcript cards, a chat panel, export buttons, etc.) -- not the fetch,
+// which is a cheap local SQLite query -- is the real cost of a "long
+// scroll". Only the first HISTORY_PAGE_SIZE entries are rendered eagerly;
+// the rest sit in pendingHistoryEntries and are revealed a page at a time
+// as the user scrolls near the bottom (see setupLoadMoreSentinel), so
+// opening History or changing the search/filter never pays for rows the
+// user hasn't scrolled to. Rows are only ever added, never unmounted once
+// rendered -- course banner clustering (renderCourseBanners) reorders rows
+// across the whole rendered list, and WS live-updates target a rendered
+// row directly, so keeping every mounted row real and permanent avoids a
+// much larger class of bugs than a fully recycling virtual list would.
+const HISTORY_PAGE_SIZE = 40;
+let pendingHistoryEntries = [];
+let historyLoadMoreObserver = null;
+let loadMoreSentinel = null;
+// Which date group renderEntriesChunk last emitted a heading for -- has to
+// survive across page boundaries so a heading is never repeated or skipped
+// depending on where a given page happens to start.
+let lastRenderedDateGroup = null;
+// The true total from the last fetch, used for the "N entries" summary --
+// counting rendered .history-row elements would undercount while
+// pendingHistoryEntries still holds unrendered rows.
+let totalHistoryCount = 0;
 
 // Per-row chat conversations, keyed by history entry id: [{ role, content }].
 // Module-level (not per-render) on purpose -- a row's DOM is rebuilt whenever
@@ -134,6 +182,7 @@ function removeRowAnimated(row) {
     () => {
       row.remove();
       pruneEmptyDateHeadings();
+      totalHistoryCount = Math.max(0, totalHistoryCount - 1);
       updateSummaryCount();
     },
     { once: true }
@@ -143,15 +192,24 @@ function removeRowAnimated(row) {
 function pruneEmptyDateHeadings() {
   historyList.querySelectorAll(".history-date-heading").forEach((heading) => {
     const next = heading.nextElementSibling;
-    if (!next || next.classList.contains("history-date-heading")) {
+    // A heading can also be immediately followed by the load-more sentinel
+    // (every row under it got clustered into a course banner elsewhere, and
+    // the rest of the list is still unrendered in pendingHistoryEntries) --
+    // that's just as empty as being followed by nothing or another heading.
+    if (
+      !next ||
+      next.classList.contains("history-date-heading") ||
+      next.classList.contains("history-load-more-sentinel")
+    ) {
       heading.remove();
     }
   });
 }
 
 function updateSummaryCount() {
-  const count = historyList.querySelectorAll(".history-row").length;
-  historySummary.textContent = count ? `${count} ${count === 1 ? "entry" : "entries"}` : "";
+  historySummary.textContent = totalHistoryCount
+    ? `${totalHistoryCount} ${totalHistoryCount === 1 ? "entry" : "entries"}`
+    : "";
 }
 
 function parseFinishedDate(finishedAt) {
@@ -221,13 +279,20 @@ async function resolveOutputFolder() {
   return window.api.chooseFolder();
 }
 
-async function retryFromHistory(entry, button) {
+async function retryFromHistory(entry, button, row) {
   button.disabled = true;
   try {
-    const outputFolder = await resolveOutputFolder();
+    // Reuse the exact folder this download was originally queued against --
+    // the whole point of retrying is picking up where it left off, not
+    // silently redirecting it to whatever the current default happens to be
+    // (or, worse, popping a folder-picker dialog for a failed batch item the
+    // user already told the app where to put). Only falls back to the
+    // current default/picker for older History rows recorded before
+    // output_folder was captured on failure too.
+    const outputFolder = entry.output_folder || (await resolveOutputFolder());
     if (!outputFolder) return;
 
-    const response = await fetch(`${API_BASE}/queue`, {
+    const response = await fetchWithRetry(`${API_BASE}/queue`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -237,11 +302,32 @@ async function retryFromHistory(entry, button) {
       }),
     });
     if (!response.ok) {
-      showToast("Failed to queue this retry.", "error");
+      const body = await response.json().catch(() => null);
+      showToast(body?.detail || "Failed to queue this retry.", "error");
       return;
     }
-    showToast("Queued for retry", "success");
-    document.querySelector('.nav-btn[data-view="view-queue"]')?.click();
+    // Deliberately stays on the History tab instead of jumping to Queue --
+    // that let you retry at most one failed download per visit, since the
+    // very first click yanked you away before you could click Retry on any
+    // other failed row. Staying put lets you retry as many failed downloads
+    // as you want in one pass; the entry is already moving in the Queue tab
+    // for whenever you want to check on it.
+    showToast("Queued for retry — check the Queue tab", "success");
+    // The failed entry is now redownloading in the Queue, so leaving its old
+    // "error" row sitting in History would just be a stale duplicate of what
+    // the Queue tab is already tracking live -- drop it now instead of
+    // waiting for the retry to finish. history_store.record() already falls
+    // back to inserting a fresh row when its update_id target is gone (see
+    // its docstring: "e.g. cleared mid-retry"), so the retry's eventual
+    // outcome still lands in History -- it just won't be stitched onto this
+    // now-removed row.
+    removeRowAnimated(row);
+    try {
+      await fetch(`${API_BASE}/history/${entry.id}`, { method: "DELETE" });
+    } catch {
+      // Best-effort: if this fails the DB row just lingers until the retry
+      // completes and updates it in place, which is harmless.
+    }
   } catch (error) {
     showToast("Failed to reach the backend: " + error.message, "error");
   } finally {
@@ -845,11 +931,15 @@ async function ensureCourseBillingConfirmed() {
 }
 
 // Repaint the course banners. Idempotent: clears any existing banners first,
-// then re-inserts one per course directly before the first rendered History
-// row that lives in that course's folder. Reads the cached `courses` + `isPro`,
-// so it's safe to call after loadHistory (rows changed), loadCourses (list
-// changed), or loadProStatus (lock state changed). Courses whose rows aren't
-// currently rendered (filtered/searched out) are simply skipped.
+// then for each course, actually CLUSTERS every one of its lessons into one
+// contiguous block (not just a banner in front of the first match) -- the
+// rest of the list stays in its normal newest-first order, but a course's
+// own rows are pulled together under one banner instead of staying scattered
+// wherever they'd otherwise fall by download date. Reads the cached
+// `courses` + `isPro`, so it's safe to call after loadHistory (rows
+// changed), loadCourses (list changed), or loadProStatus (lock state
+// changed). Courses with fewer than 2 currently-rendered rows (the rest
+// filtered/searched out, or not loaded yet) are simply skipped for this pass.
 function renderCourseBanners() {
   // A repaint (called on every loadCourses -- including the WS-driven
   // refreshes this feature's own "Summarize remaining" nudge triggers)
@@ -866,25 +956,53 @@ function renderCourseBanners() {
     }
     el.remove();
   });
-  if (!Array.isArray(courses) || !courses.length) return;
-  courses.forEach((course) => {
-    // Backend only returns folders with 2+ lessons; guard defensively anyway.
-    if (!course || (course.lesson_count || 0) < 2) return;
-    let firstRow = null;
-    for (const tracked of transcriptRows.values()) {
-      // Only target a row still attached to the list: a single-entry delete
-      // removes the row from the DOM but leaves it in transcriptRows, and
-      // insertBefore on a detached node would throw.
-      if (tracked.row.parentNode === historyList && entryBelongsToCourse(tracked.entry, course.folder)) {
-        firstRow = tracked.row;
-        break;
+  if (Array.isArray(courses) && courses.length) {
+    courses.forEach((course) => {
+      // Backend only returns folders with 2+ lessons; guard defensively anyway.
+      if (!course || (course.lesson_count || 0) < 2) return;
+      // transcriptRows iterates in the same newest-first order rows were
+      // appended in loadHistory, which (before any clustering below) is
+      // still the current DOM order -- so this naturally collects a
+      // course's rows newest-first, matching the rest of the list.
+      const matchingRows = [];
+      for (const tracked of transcriptRows.values()) {
+        // Only target rows still attached to the list: a single-entry
+        // delete removes the row from the DOM but leaves it in
+        // transcriptRows, and insertBefore on a detached node would throw.
+        if (tracked.row.parentNode === historyList && entryBelongsToCourse(tracked.entry, course.folder)) {
+          matchingRows.push(tracked.row);
+        }
       }
-    }
-    if (!firstRow) return;
-    const banner = renderCourseBanner(course);
-    historyList.insertBefore(banner, firstRow);
-    if (openFolders.has(course.folder)) {
-      reopenCourseWorkspace(banner);
+      if (matchingRows.length < 2) return;
+      const [firstRow, ...restRows] = matchingRows;
+      const banner = renderCourseBanner(course);
+      historyList.insertBefore(banner, firstRow);
+      // Pull every other lesson in this course up to sit immediately after
+      // the first, in the same relative (newest-first) order they already
+      // had -- this is what actually groups the course into one visual
+      // block instead of leaving a banner over just one scattered row.
+      let insertAfter = firstRow;
+      restRows.forEach((row) => {
+        historyList.insertBefore(row, insertAfter.nextSibling);
+        insertAfter = row;
+      });
+      if (openFolders.has(course.folder)) {
+        reopenCourseWorkspace(banner);
+      }
+    });
+  }
+  // Clustering can strand a date heading with no rows left directly under
+  // it (its rows got pulled into a course block elsewhere) -- drop any
+  // heading immediately followed by another heading, the load-more
+  // sentinel, or nothing.
+  historyList.querySelectorAll(".history-date-heading").forEach((heading) => {
+    const next = heading.nextElementSibling;
+    if (
+      !next ||
+      next.classList.contains("history-date-heading") ||
+      next.classList.contains("history-load-more-sentinel")
+    ) {
+      heading.remove();
     }
   });
 }
@@ -1369,7 +1487,7 @@ function renderHistoryRow(entry) {
   const retryBtn = row.querySelector(".retry-btn");
   if (isError) {
     retryBtn.hidden = false;
-    retryBtn.addEventListener("click", () => retryFromHistory(entry, retryBtn));
+    retryBtn.addEventListener("click", () => retryFromHistory(entry, retryBtn, row));
   }
 
   row.querySelector(".history-copy-btn").addEventListener("click", () => copyToClipboard(entry.url, "Link"));
@@ -1436,6 +1554,64 @@ function renderHistoryRow(entry) {
   return row;
 }
 
+// Builds a fragment of date heading(s) + rows for one page of entries,
+// continuing lastRenderedDateGroup across page boundaries so a heading is
+// never repeated or skipped depending on where a given page happens to start.
+function renderEntriesChunk(entries) {
+  const fragment = document.createDocumentFragment();
+  entries.forEach((entry) => {
+    const group = dateGroupLabel(parseFinishedDate(entry.finished_at));
+    if (group !== lastRenderedDateGroup) {
+      fragment.appendChild(renderDateHeading(group));
+      lastRenderedDateGroup = group;
+    }
+    fragment.appendChild(renderHistoryRow(entry));
+  });
+  return fragment;
+}
+
+// Sentinel <li> kept as the last child of #history-list while entries remain
+// unrendered — an IntersectionObserver with a generous rootMargin reveals
+// the next page well before the user actually reaches the bottom, so
+// scrolling never visibly outruns rendering.
+function setupLoadMoreSentinel() {
+  loadMoreSentinel = document.createElement("li");
+  loadMoreSentinel.className = "history-load-more-sentinel";
+  loadMoreSentinel.setAttribute("aria-hidden", "true");
+  historyList.appendChild(loadMoreSentinel);
+  historyLoadMoreObserver = new IntersectionObserver(
+    (observedEntries) => {
+      if (observedEntries.some((e) => e.isIntersecting)) revealNextHistoryPage();
+    },
+    { rootMargin: "800px 0px" }
+  );
+  historyLoadMoreObserver.observe(loadMoreSentinel);
+}
+
+function revealNextHistoryPage() {
+  if (!pendingHistoryEntries.length) return;
+  const nextPage = pendingHistoryEntries.slice(0, HISTORY_PAGE_SIZE);
+  pendingHistoryEntries = pendingHistoryEntries.slice(HISTORY_PAGE_SIZE);
+  historyList.insertBefore(renderEntriesChunk(nextPage), loadMoreSentinel);
+  // Newly-mounted rows may belong to an already-rendered course — repaint
+  // banners so they get clustered in too (see renderCourseBanners' own
+  // idempotency note).
+  renderCourseBanners();
+  if (!pendingHistoryEntries.length) teardownLoadMoreObserver();
+}
+
+function teardownLoadMoreObserver() {
+  if (historyLoadMoreObserver) {
+    historyLoadMoreObserver.disconnect();
+    historyLoadMoreObserver = null;
+  }
+  if (loadMoreSentinel) {
+    loadMoreSentinel.remove();
+    loadMoreSentinel = null;
+  }
+  pendingHistoryEntries = [];
+}
+
 async function loadHistory() {
   try {
     const params = new URLSearchParams();
@@ -1446,6 +1622,9 @@ async function loadHistory() {
     const body = await response.json();
     historyList.innerHTML = "";
     transcriptRows.clear();
+    teardownLoadMoreObserver();
+    lastRenderedDateGroup = null;
+    totalHistoryCount = body.entries.length;
     // A search/filter that matches nothing needs its own copy — an empty list
     // otherwise falls back to #history-list:empty::before ("no downloads yet"),
     // which is misleading when downloads exist but none match. Rendering a real
@@ -1458,15 +1637,10 @@ async function loadHistory() {
       updateSummaryCount();
       return true;
     }
-    let lastGroup = null;
-    body.entries.forEach((entry) => {
-      const group = dateGroupLabel(parseFinishedDate(entry.finished_at));
-      if (group !== lastGroup) {
-        historyList.appendChild(renderDateHeading(group));
-        lastGroup = group;
-      }
-      historyList.appendChild(renderHistoryRow(entry));
-    });
+    const firstPage = body.entries.slice(0, HISTORY_PAGE_SIZE);
+    pendingHistoryEntries = body.entries.slice(HISTORY_PAGE_SIZE);
+    historyList.appendChild(renderEntriesChunk(firstPage));
+    if (pendingHistoryEntries.length) setupLoadMoreSentinel();
     updateSummaryCount();
     // Rows were just rebuilt, so re-insert the course banners above them using
     // the cached course list (loadCourses() refreshes that list separately).
@@ -1517,6 +1691,93 @@ refreshBtn.addEventListener("click", async () => {
   showToast(ok ? "History refreshed" : "Failed to refresh history", ok ? "success" : "error");
   refreshBtn.classList.remove("is-spinning");
   refreshBtn.disabled = false;
+});
+
+// Re-queues every entry currently sitting in History with status "error" in
+// one pass, reusing the exact same /queue + retry_of_history_id call the
+// single-row Retry button already makes -- fetched fresh from the server
+// (not scraped from whatever's currently rendered/filtered) so this always
+// acts on the true, complete set of failed downloads. Mirrors the single-row
+// retry's own choices: one shared output folder resolved once (not
+// per-entry), stays on the History tab, and best-effort removes each
+// retried entry's now-stale row instead of waiting for it to update in place.
+retryFailedBtn.addEventListener("click", async () => {
+  retryFailedBtn.disabled = true;
+  const originalLabel = retryFailedBtn.textContent;
+  try {
+    const response = await fetch(`${API_BASE}/history?status=error&limit=500`);
+    if (!response.ok) {
+      showToast("Couldn't check for failed downloads.", "error");
+      return;
+    }
+    const body = await response.json();
+    const failedEntries = body.entries || [];
+    if (!failedEntries.length) {
+      showToast("No failed downloads to retry.", "info");
+      return;
+    }
+
+    const confirmed = await showConfirmModal({
+      title: "Retry all failed downloads?",
+      message:
+        `This will re-queue ${failedEntries.length} failed ` +
+        `${failedEntries.length === 1 ? "download" : "downloads"}. ` +
+        "You'll be asked to pick an output folder if you don't have a default one set.",
+      confirmLabel: "Retry all",
+      cancelLabel: "Cancel",
+    });
+    if (!confirmed) return;
+
+    const outputFolder = await resolveOutputFolder();
+    if (!outputFolder) return;
+
+    retryFailedBtn.textContent = "Retrying…";
+    let succeeded = 0;
+    let failed = 0;
+    for (const entry of failedEntries) {
+      try {
+        const retryResponse = await fetch(`${API_BASE}/queue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            urls_text: entry.url,
+            output_folder: outputFolder,
+            retry_of_history_id: entry.id,
+          }),
+        });
+        if (!retryResponse.ok) {
+          failed += 1;
+          continue;
+        }
+        succeeded += 1;
+        try {
+          await fetch(`${API_BASE}/history/${entry.id}`, { method: "DELETE" });
+        } catch {
+          // Best-effort, same as the single-row retry: harmless if this
+          // fails, the row just lingers until the retry updates it in place.
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+
+    if (succeeded) {
+      showToast(
+        failed
+          ? `Queued ${succeeded} for retry, ${failed} couldn't be queued — check the Queue tab.`
+          : `Queued ${succeeded} ${succeeded === 1 ? "download" : "downloads"} for retry — check the Queue tab.`,
+        failed ? "warning" : "success"
+      );
+    } else {
+      showToast("Couldn't queue any retries.", "error");
+    }
+    await loadHistory();
+  } catch (error) {
+    showToast("Failed to reach the backend: " + error.message, "error");
+  } finally {
+    retryFailedBtn.textContent = originalLabel;
+    retryFailedBtn.disabled = false;
+  }
 });
 
 // -- Batch "transcribe all eligible" ----------------------------------------
@@ -1600,11 +1861,56 @@ searchInput.addEventListener("input", () => {
 });
 statusFilter.addEventListener("change", loadHistory);
 
+// Skeleton placeholders shaped like a real history row (icon circle, title +
+// meta lines, action-icon circles), shown synchronously before the very first
+// fetch so the view never opens genuinely blank. Only used on the first-ever
+// load: subsequent search/filter loads keep the old list visible while the new
+// fetch is in flight (stale-while-revalidate in loadHistory), so no skeleton
+// churn is added there. Cleared by loadHistory's innerHTML reset on success, or
+// explicitly before the retry/empty states below so nothing stacks on them.
+function renderHistorySkeletons(count = 4) {
+  // Guards against duplicate rows if this is ever called a second time
+  // before clearHistorySkeletons runs (not reachable today -- only one
+  // call site -- but cheap to make safe against future changes).
+  if (historyList.querySelector(".history-row--skeleton")) return;
+  const titleWidths = ["68%", "80%", "56%", "72%"];
+  const metaWidths = ["40%", "34%", "46%", "38%"];
+  const fragment = document.createDocumentFragment();
+  for (let i = 0; i < count; i += 1) {
+    const li = document.createElement("li");
+    li.className = "queue-row history-row history-row--skeleton";
+    li.setAttribute("aria-hidden", "true");
+    li.innerHTML = `
+      <div class="history-row__inner">
+        <span class="skeleton skeleton--circle" style="width: 38px; height: 38px"></span>
+        <div class="history-row__body">
+          <span class="skeleton skeleton--line" style="width: ${titleWidths[i % titleWidths.length]}"></span>
+          <span class="skeleton skeleton--line" style="width: ${metaWidths[i % metaWidths.length]}; margin-top: 8px"></span>
+        </div>
+        <div class="history-row__actions">
+          <span class="skeleton skeleton--circle" style="width: 32px; height: 32px"></span>
+          <span class="skeleton skeleton--circle" style="width: 32px; height: 32px"></span>
+          <span class="skeleton skeleton--circle" style="width: 32px; height: 32px"></span>
+        </div>
+      </div>
+    `;
+    fragment.appendChild(li);
+  }
+  historyList.appendChild(fragment);
+}
+
+function clearHistorySkeletons() {
+  historyList.querySelectorAll(".history-row--skeleton").forEach((el) => el.remove());
+}
+
 // Persistent inline fallback so an exhausted startup load doesn't leave the
 // list looking like an empty history — a text line plus a Retry button. A
 // successful loadHistory() clears the list (and this element) on its own.
 function showHistoryLoadError() {
   if (historyList.querySelector(".load-error")) return;
+  // The skeletons were the "still loading" state; now that we've given up,
+  // clear them so the retry affordance isn't stacked on top of them.
+  clearHistorySkeletons();
   const li = document.createElement("li");
   li.className = "load-error";
   li.innerHTML = `
@@ -1637,6 +1943,9 @@ async function loadHistoryOnStartup(retriesLeft = 10) {
   }
 }
 
+// Paint skeleton rows first so the very first open shows shaped placeholders
+// instead of a blank list while the initial fetch is in flight.
+renderHistorySkeletons();
 loadHistoryOnStartup();
 // Best-effort, fire-and-forget: both only drive UI niceties (the Pro-gated
 // Lesson Notes display and the provider name in the confirm dialogs), so a
@@ -1657,7 +1966,18 @@ let historyPushTimer;
 connectQueueSocket((event) => {
   if (event.type === "transcript_update" || event.type === "summary_update") {
     const tracked = transcriptRows.get(event.history_id);
-    if (!tracked) return; // row isn't currently rendered (different filter/search)
+    if (!tracked) {
+      // Row isn't currently mounted — either a different filter/search, or
+      // (now that History pages in lazily) still sitting in
+      // pendingHistoryEntries. Patch the cached entry in place for the
+      // latter case, so scrolling to it later renders the live state
+      // instead of what the initial fetch saw.
+      if (event.entry) {
+        const pendingIndex = pendingHistoryEntries.findIndex((e) => e.id === event.history_id);
+        if (pendingIndex !== -1) pendingHistoryEntries[pendingIndex] = event.entry;
+      }
+      return;
+    }
     const kind = event.type === "transcript_update" ? "transcript" : "summary";
     if (event.status === "running") {
       setProgress(tracked.row, kind, event.detail, event.percent);

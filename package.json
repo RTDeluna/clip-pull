@@ -22,7 +22,11 @@
   "build": {
     "appId": "com.clippull.downloader",
     "productName": "CLIP.PULL",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      "backend/dist/**",
+      "backend/vendor/**"
+    ],
     "files": [
       "main.js",
       "preload.js",

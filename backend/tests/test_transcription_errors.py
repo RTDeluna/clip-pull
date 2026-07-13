@@ -66,6 +66,13 @@ def test_humanize_transcription_error_rewrites_network_failure():
     assert "Couldn't reach Gemini" in reason
 
 
+def test_humanize_transcription_error_warns_about_double_billing_on_timeout():
+    exc = AIClientError("timed out", provider="gemini", status_code=None, timed_out=True)
+    reason = humanize_transcription_error(exc)
+    assert "Gemini" in reason
+    assert "billed twice" in reason
+
+
 def test_humanize_transcription_error_names_new_providers_correctly():
     for provider, expected_name in [("openai", "OpenAI"), ("groq", "Groq"), ("openrouter", "OpenRouter")]:
         exc = AIClientError("unauthorized", provider=provider, status_code=401)
@@ -99,3 +106,11 @@ def test_is_retryable_true_for_rate_limit_and_5xx():
 def test_is_retryable_false_for_bad_key():
     assert is_retryable(AIClientError("x", provider="gemini", status_code=400)) is False
     assert is_retryable(AIClientError("x", provider="anthropic", status_code=401)) is False
+
+
+def test_is_retryable_false_for_timeout_even_though_status_code_is_none():
+    # A timeout is a status_code=None case too, but must NOT be auto-retried
+    # like an ordinary connection failure -- the request may have already
+    # reached the provider and started being billed.
+    exc = AIClientError("x", provider="gemini", status_code=None, timed_out=True)
+    assert is_retryable(exc) is False

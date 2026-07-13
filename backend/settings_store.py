@@ -19,6 +19,10 @@ DEFAULT_SETTINGS = {
     "summarization_provider": "anthropic",
     "auto_transcribe_on_download": False,
     "auto_summarize_after_transcribe": False,
+    # Optional -- feeds the Insights "time saved" framing ($ = hours
+    # processed x this rate). Nullable/no default: unset means the UI just
+    # shows hours, not a fabricated dollar figure.
+    "time_saved_hourly_rate": None,
 }
 
 
@@ -52,6 +56,7 @@ class SettingsStore:
             "summarization_provider": row["summarization_provider"],
             "auto_transcribe_on_download": bool(row["auto_transcribe_on_download"]),
             "auto_summarize_after_transcribe": bool(row["auto_summarize_after_transcribe"]),
+            "time_saved_hourly_rate": row["time_saved_hourly_rate"],
         }
 
     def update(self, **changes) -> dict:

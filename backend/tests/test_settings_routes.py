@@ -107,3 +107,17 @@ def test_patch_settings_persists_auto_process_toggles():
     assert body["auto_transcribe_on_download"] is True
     assert body["auto_summarize_after_transcribe"] is True
     assert store.get()["auto_transcribe_on_download"] is True
+
+
+def test_patch_settings_persists_time_saved_hourly_rate():
+    client, store = _make_client()
+    response = client.patch("/settings", json={"time_saved_hourly_rate": 60})
+    assert response.status_code == 200
+    assert response.json()["time_saved_hourly_rate"] == 60
+    assert store.get()["time_saved_hourly_rate"] == 60
+
+
+def test_patch_settings_rejects_negative_hourly_rate():
+    client, _ = _make_client()
+    response = client.patch("/settings", json={"time_saved_hourly_rate": -5})
+    assert response.status_code == 422

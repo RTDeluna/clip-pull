@@ -181,6 +181,37 @@ def test_clear_respects_status_filter():
     assert remaining[0]["status"] == "done"
 
 
+def test_record_stores_output_folder_even_on_a_failed_download():
+    # output_path is only known once a file actually gets written (None on
+    # failure), but output_folder is known upfront and must survive a
+    # failure too -- it's what lets a History-tab retry reuse the same
+    # destination instead of falling back to the current default/prompting
+    # the user again.
+    store = HistoryStore()
+    result = _record(
+        store, status="error", error_reason="Blocked", output_path=None,
+        output_folder="C:/downloads/course-a",
+    )
+    assert result["output_folder"] == "C:/downloads/course-a"
+
+
+def test_record_with_update_id_preserves_output_folder_across_a_retry():
+    store = HistoryStore()
+    first = _record(
+        store, status="error", error_reason="Blocked", output_path=None,
+        output_folder="C:/downloads/course-a",
+    )
+    second = _record(
+        store,
+        status="done",
+        error_reason=None,
+        output_path="C:/downloads/course-a/Test Video [1].mp4",
+        output_folder="C:/downloads/course-a",
+        update_id=first["id"],
+    )
+    assert second["output_folder"] == "C:/downloads/course-a"
+
+
 def test_record_with_update_id_updates_existing_row_in_place():
     store = HistoryStore()
     first = _record(store, status="error", error_reason="Blocked", output_path=None)

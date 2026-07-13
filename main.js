@@ -1,6 +1,7 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, clipboard } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, clipboard, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { spawn, execSync, execFile } = require("child_process");
 const http = require("http");
 
@@ -14,6 +15,15 @@ const EXTENSION_DIR = path.join(__dirname, "assets", "extension");
 
 const BACKEND_PORT = 8934;
 const BACKEND_HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`;
+
+// A fresh random secret every launch, required by the backend on every
+// request except /health (see backend/main.py's require_api_token). The
+// backend binds to 127.0.0.1, but that alone doesn't stop a webpage open in
+// the user's own browser from fetch()-ing it too -- this token is what
+// actually gates that off, since only this app's own renderer (via the
+// header injection below and the token handed to preload for the WS query
+// param) ever learns it.
+const API_TOKEN = crypto.randomBytes(32).toString("hex");
 
 let backendProcess = null;
 let mainWindow = null;
@@ -47,14 +57,14 @@ function spawnBackend() {
     const dbPath = path.join(app.getPath("userData"), "clip_pull.db");
     backendProcess = spawn(getBackendExecutablePath(), [], {
       stdio: "inherit",
-      env: { ...process.env, CLIP_PULL_DB_PATH: dbPath, ...ffmpegEnv },
+      env: { ...process.env, CLIP_PULL_DB_PATH: dbPath, CLIP_PULL_API_TOKEN: API_TOKEN, ...ffmpegEnv },
       windowsHide: true,
     });
   } else {
     backendProcess = spawn("python", ["main.py"], {
       cwd: path.join(__dirname, "backend"),
       stdio: "inherit",
-      env: { ...process.env, ...ffmpegEnv },
+      env: { ...process.env, CLIP_PULL_API_TOKEN: API_TOKEN, ...ffmpegEnv },
     });
   }
   backendProcess.on("error", (err) => {
@@ -137,6 +147,13 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // The officially-supported way to hand startup data to a preload
+      // script under contextIsolation -- preload.js reads this back off
+      // process.argv. Used only for the WebSocket connection (see
+      // ws-client.js): browsers can't set custom headers on `new
+      // WebSocket()`, so that one path needs the token in hand explicitly
+      // rather than relying on the header injection below.
+      additionalArguments: [`--clip-pull-token=${API_TOKEN}`],
     },
   });
   mainWindow.loadFile(path.join(__dirname, "frontend", "index.html"));
@@ -158,6 +175,14 @@ ipcMain.handle("choose-folder", async () => {
 });
 
 ipcMain.handle("reveal-file", (_, filePath) => {
+  // filePath always originates from a completed download's own recorded
+  // output_path, never free-typed by the user -- but it crosses the IPC
+  // boundary as a plain string, so a defensive type/existence check here
+  // costs nothing and rules out a malformed or stale call ever reaching
+  // shell.showItemInFolder with garbage.
+  if (typeof filePath !== "string" || !filePath || !fs.existsSync(filePath)) {
+    return;
+  }
   try {
     shell.showItemInFolder(filePath);
   } catch (err) {
@@ -316,6 +341,62 @@ async function getDefaultBrowserLaunch() {
   return commandMatch ? parseShellCommand(commandMatch[1].trim()) : null;
 }
 
+// Whether a process with this image name (e.g. "chrome.exe") is currently
+// running, via tasklist -- used by launchChromiumUrl below to decide whether
+// its cold-start workaround is actually needed. tasklist always exits 0
+// regardless of a match; a non-match prints "INFO: No tasks are running..."
+// instead, so this checks the output text, not the exit code. Any failure to
+// even ask (tasklist missing/timeout) resolves false -- the safer default,
+// since it just costs one extra warm-up launch rather than a silently
+// dropped URL.
+function isProcessRunning(imageName) {
+  return new Promise((resolve) => {
+    execFile(
+      "tasklist.exe",
+      ["/FI", `IMAGENAME eq ${imageName}`, "/NH"],
+      { timeout: 5000 },
+      (error, stdout) => {
+        if (error) return resolve(false);
+        resolve(stdout.toLowerCase().includes(imageName.toLowerCase()));
+      }
+    );
+  });
+}
+
+// Chromium-based browsers (Chrome, Edge, Brave, ...) refuse to navigate
+// straight to an internal chrome://-style URL passed on the command line at
+// a genuine cold start -- a deliberate security mitigation against local
+// scripts silently opening sensitive internal pages -- and just open the
+// normal new-tab page instead, dropping the URL entirely. The exact same
+// command-line URL DOES work once the browser is already running: a second
+// launch gets forwarded via IPC to the existing instance instead of being
+// parsed as a fresh command line, and that forwarded navigation isn't
+// subject to the cold-start restriction. So: only when the browser isn't
+// already running, launch it once with no URL to get it up, give it a
+// moment to become "the running instance," then launch again with the real
+// URL -- which now lands instead of being silently swallowed.
+// Chrome's own path is fs.existsSync-verified before use, but a resolved
+// default-browser path comes straight from the registry and could be stale
+// (uninstalled/moved app). spawn() reports that asynchronously as an
+// unhandled 'error' event, which -- with no listener -- crashes the main
+// process; a no-op listener here just lets the launch attempt fail quietly
+// (the caller already has no way to react to a detached, unref'd process
+// anyway) instead of taking the whole app down over a browser that won't open.
+function spawnDetached(exe, args) {
+  const child = spawn(exe, args, { detached: true, stdio: "ignore" });
+  child.on("error", () => {});
+  child.unref();
+}
+
+async function launchChromiumUrl(exe, baseArgs, url) {
+  const alreadyRunning = await isProcessRunning(path.basename(exe));
+  if (!alreadyRunning) {
+    spawnDetached(exe, baseArgs);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  spawnDetached(exe, [...baseArgs, url]);
+}
+
 ipcMain.handle("open-chrome-extensions", async () => {
   const url = "chrome://extensions";
   if (process.platform === "win32") {
@@ -323,8 +404,8 @@ ipcMain.handle("open-chrome-extensions", async () => {
     if (chromePath) {
       try {
         const lastProfile = getChromeLastProfileDirectory();
-        const args = lastProfile ? [`--profile-directory=${lastProfile}`, url] : [url];
-        spawn(chromePath, args, { detached: true, stdio: "ignore" }).unref();
+        const baseArgs = lastProfile ? [`--profile-directory=${lastProfile}`] : [];
+        await launchChromiumUrl(chromePath, baseArgs, url);
         return { ok: true };
       } catch (error) {
         console.error("Could not launch Chrome directly:", error);
@@ -334,10 +415,19 @@ ipcMain.handle("open-chrome-extensions", async () => {
     try {
       const browser = await getDefaultBrowserLaunch();
       if (browser?.exe) {
-        const args = browser.args.some((arg) => arg.includes("%1"))
-          ? browser.args.map((arg) => arg.replace("%1", url))
-          : [...browser.args, url];
-        spawn(browser.exe, args, { detached: true, stdio: "ignore" }).unref();
+        if (browser.args.some((arg) => arg.includes("%1"))) {
+          // A %1-style registry command already dictates exactly where the
+          // URL is substituted, so there's no clean "base args without the
+          // URL" to warm the browser up with first -- the cold-start
+          // double-launch trick doesn't cleanly apply here. This form is
+          // uncommon enough (most browsers just take a trailing URL arg,
+          // handled by launchChromiumUrl above) that falling back to a
+          // single direct launch is an acceptable simplification.
+          const args = browser.args.map((arg) => arg.replace("%1", url));
+          spawnDetached(browser.exe, args);
+        } else {
+          await launchChromiumUrl(browser.exe, browser.args, url);
+        }
         return { ok: true };
       }
     } catch (error) {
@@ -415,8 +505,38 @@ ipcMain.handle("save-extension-package", async () => {
   return { ok: true, path: result.filePath };
 });
 
+// Generic "save this text content to a file the user picks" -- used by the
+// Insights CSV export (and available for any future plain-text export)
+// rather than relying on the browser's own download mechanics, which this
+// app doesn't otherwise use anywhere (every existing export writes via the
+// backend or, like save-extension-package above, a native save dialog).
+ipcMain.handle("save-text-file", async (_, { content, defaultFilename, filters }) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultFilename,
+    filters: filters || [{ name: "All Files", extensions: ["*"] }],
+  });
+  if (result.canceled || !result.filePath) {
+    return { ok: false, error: "cancelled" };
+  }
+  fs.writeFileSync(result.filePath, content, "utf-8");
+  return { ok: true, path: result.filePath };
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
+  // Transparently attaches the auth token to every request the renderer's
+  // fetch() calls send to the backend, so frontend/*.js never needs to know
+  // about it -- this only touches requests originating from THIS Electron
+  // session, an external browser tab has no way to trigger it or learn the
+  // token. Registered before spawnBackend/createWindow so it's in place
+  // before the renderer can possibly issue its first request.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: [`http://127.0.0.1:${BACKEND_PORT}/*`] },
+    (details, callback) => {
+      details.requestHeaders["X-CLIP-PULL-Token"] = API_TOKEN;
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
   spawnBackend();
   // The packaged backend is a PyInstaller onefile executable, which
   // self-extracts to a temp directory on every launch — on first run,
@@ -424,6 +544,19 @@ app.whenReady().then(() => {
   // than a dev-mode `python main.py` start. 40 retries at 300ms gives it
   // 12s before falling back, instead of the previous 6s.
   waitForBackend(40, createWindow);
+});
+
+// Defense-in-depth, not a fix for anything reachable today: the app never
+// navigates or opens a new window on its own, but if a future regression
+// ever did (or a dependency tried to), these deny it outright rather than
+// silently letting a BrowserWindow full of window.api's bridged APIs open
+// against arbitrary/remote content.
+app.on("web-contents-created", (_event, contents) => {
+  // Tab switching (Queue/History/Settings/...) is DOM-based, not real page
+  // navigation, and the window never loads anything but its own initial
+  // frontend/index.html -- so there is no legitimate will-navigate to allow.
+  contents.on("will-navigate", (navigationEvent) => navigationEvent.preventDefault());
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
 });
 
 app.on("window-all-closed", () => {

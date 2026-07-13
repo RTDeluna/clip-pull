@@ -600,4 +600,4 @@ function findWistiaLinkGeneral() {
   window.addEventListener("popstate", onNavigate);
 })();
 
-console.log("🚀 Skool Video Downloader loaded");
+console.log("🚀 CLIP.PULL Course Downloader scanning this page");

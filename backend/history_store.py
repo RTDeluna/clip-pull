@@ -50,6 +50,7 @@ class HistoryStore:
         error_reason: Optional[str],
         retry_count: int,
         update_id: Optional[int] = None,
+        output_folder: Optional[str] = None,
     ) -> dict:
         """Writes a finished download's outcome. When update_id names an
         existing row (a retry of that same History entry, either re-queued
@@ -57,7 +58,13 @@ class HistoryStore:
         that row is updated in place instead of inserting a new one -- so a
         failed-then-retried-successfully download ends up as one History
         entry reflecting the latest outcome, not two. Falls back to a plain
-        insert if update_id's row is gone (e.g. cleared mid-retry)."""
+        insert if update_id's row is gone (e.g. cleared mid-retry).
+
+        output_folder is the destination folder the download was queued
+        against -- recorded even on failure (unlike output_path, which is
+        only known once a file actually gets written), so a History-tab
+        retry of a failed download can reuse the same folder instead of
+        falling back to the current default/prompting the user again."""
         with self._lock:
             if update_id is not None:
                 cursor = self._conn.execute(
@@ -65,12 +72,12 @@ class HistoryStore:
                     UPDATE history
                     SET entry_id = ?, batch_id = ?, url = ?, title = ?, output_path = ?,
                         total_size = ?, status = ?, error_reason = ?, retry_count = ?,
-                        finished_at = datetime('now')
+                        output_folder = ?, finished_at = datetime('now')
                     WHERE id = ?
                     """,
                     (
                         entry_id, batch_id, url, title, output_path, total_size,
-                        status, error_reason, retry_count, update_id,
+                        status, error_reason, retry_count, output_folder, update_id,
                     ),
                 )
                 self._conn.commit()
@@ -84,12 +91,12 @@ class HistoryStore:
                 """
                 INSERT INTO history
                   (entry_id, batch_id, url, title, output_path, total_size,
-                   status, error_reason, retry_count, finished_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                   status, error_reason, retry_count, output_folder, finished_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 """,
                 (
                     entry_id, batch_id, url, title, output_path, total_size,
-                    status, error_reason, retry_count,
+                    status, error_reason, retry_count, output_folder,
                 ),
             )
             self._conn.commit()

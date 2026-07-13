@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from background_tasks import track_task
-from downloader import DownloadOrchestrator, resolve_output_folder
+from downloader import DownloadOrchestrator, is_dangerous_output_folder, resolve_output_folder
 from history_store import HistoryStore
 from queue_manager import QueueManager
 from settings_store import SettingsStore
-from url_validation import parse_url_list
+from url_validation import is_supported_url, parse_url_list
 
 DB_BUSY_MESSAGE = "The app's local database is busy — try again in a moment."
 
@@ -21,6 +21,21 @@ DB_BUSY_MESSAGE = "The app's local database is busy — try again in a moment."
 # sync/update_batch payload without bound, and is far more likely to be a
 # mistake (pasted the wrong thing) than a real batch.
 MAX_URLS_PER_BATCH = 500
+
+
+def _validate_referer(value: Optional[str]) -> Optional[str]:
+    """Shared by QueueRequest and RetryRequest below. referer rides straight
+    into yt-dlp's outbound request headers (see downloader.py's build_ydl_opts)
+    with no shape check before this -- rejecting anything that isn't a real
+    http(s) URL up front is cheap and closes off embedding anything
+    unexpected in a header value. Empty string is normalized to None rather
+    than rejected, matching the `if referer:` falsy check already used
+    downstream wherever it's consumed."""
+    if not value:
+        return None
+    if not is_supported_url(value):
+        raise ValueError("referer must be a valid http(s) URL")
+    return value
 
 
 class QueueRequest(BaseModel):
@@ -34,9 +49,13 @@ class QueueRequest(BaseModel):
     # row in place instead of adding a second, duplicate entry for it.
     retry_of_history_id: Optional[int] = None
 
+    _check_referer = field_validator("referer")(_validate_referer)
+
 
 class RetryRequest(BaseModel):
     referer: Optional[str] = None
+
+    _check_referer = field_validator("referer")(_validate_referer)
 
 
 class AppState:
@@ -101,6 +120,11 @@ def build_queue_router(
         # and queue valid_urls as-is, keeping previously_downloaded_urls for the badge flag.
 
         resolved_folder = resolve_output_folder(request.output_folder, request.subfolder)
+        if is_dangerous_output_folder(resolved_folder):
+            raise HTTPException(
+                status_code=400,
+                detail="That folder isn't allowed as a download destination.",
+            )
         try:
             Path(resolved_folder).mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -148,9 +172,23 @@ def build_queue_router(
     async def retry_entry(entry_id: str, request: RetryRequest) -> dict:
         try:
             entry = queue_manager.get(entry_id)
-            queue_manager.reset_for_retry(entry_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
+        # Retry only makes sense for a failed entry. Rejecting anything else
+        # closes a real race: a double-fired click (or any other duplicate
+        # call) landing while the first retry is already downloading would
+        # otherwise reset it back to 0% and spin up a second, concurrent
+        # download of the same file underneath it. This check is safe against
+        # that race itself -- reset_for_retry below flips status away from
+        # "error" synchronously, so a duplicate request processed right after
+        # already sees the new status and is rejected here, before it can
+        # touch anything.
+        if entry.status != "error":
+            raise HTTPException(
+                status_code=409,
+                detail="This download isn't in a failed state, so it can't be retried right now.",
+            )
+        queue_manager.reset_for_retry(entry_id)
         referer = request.referer or state.referer
         track_task(
             asyncio.create_task(
@@ -178,14 +216,21 @@ def build_queue_router(
     async def resume_entry(entry_id: str, request: RetryRequest) -> dict:
         try:
             entry = queue_manager.get(entry_id)
-            # Broadcast the "resuming" transition immediately rather than
-            # waiting for the scheduled download task to actually start
-            # (download_entry only sets "downloading" once it acquires a
-            # concurrency slot) -- otherwise the row visibly sits on
-            # "Paused" for a beat after Resume is clicked.
-            queue_manager.mark_resuming(entry_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="This download is no longer in the queue.")
+        # Same duplicate-call protection as retry_entry above, for the same
+        # reason: only a "paused" entry can legitimately be resumed.
+        if entry.status != "paused":
+            raise HTTPException(
+                status_code=409,
+                detail="This download isn't paused, so it can't be resumed right now.",
+            )
+        # Broadcast the "resuming" transition immediately rather than
+        # waiting for the scheduled download task to actually start
+        # (download_entry only sets "downloading" once it acquires a
+        # concurrency slot) -- otherwise the row visibly sits on
+        # "Paused" for a beat after Resume is clicked.
+        queue_manager.mark_resuming(entry_id)
         referer = request.referer or state.referer
         track_task(
             asyncio.create_task(

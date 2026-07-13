@@ -356,6 +356,59 @@ def test_request_transcription_guards_against_double_start(tmp_path):
     asyncio.run(scenario())
 
 
+def test_request_transcription_reserves_the_slot_before_any_task_runs():
+    # Regression test for a real race: asyncio.create_task() only schedules
+    # a coroutine, it doesn't run any of it immediately -- so two
+    # synchronous request_transcription() calls back-to-back (e.g. the
+    # auto-transcribe-on-download trigger firing at the same moment as a
+    # manual Transcribe click, both handled within the same event-loop
+    # tick, before either task's first line has had a chance to run) must
+    # not both succeed. No asyncio.run/task needed here -- request_transcription
+    # itself is plain synchronous code.
+    orchestrator, _ = _make_orchestrator()
+    assert orchestrator.request_transcription(123) is True
+    assert orchestrator.request_transcription(123) is False
+
+
+def test_release_transcription_gives_back_an_unused_reservation():
+    orchestrator, _ = _make_orchestrator()
+    assert orchestrator.request_transcription(123) is True
+    orchestrator.release_transcription(123)
+    assert orchestrator.request_transcription(123) is True
+
+
+def test_release_transcription_does_not_clobber_a_real_running_task():
+    # release_transcription must only ever clear its OWN placeholder
+    # reservation -- never a real in-flight Task another caller is tracking.
+    orchestrator, _ = _make_orchestrator()
+
+    async def scenario():
+        assert orchestrator.request_transcription(123) is True
+        task = asyncio.ensure_future(_never_ending())
+        orchestrator._active_transcription_tasks[123] = task
+        orchestrator.release_transcription(123)  # should be a no-op now
+        assert orchestrator.request_transcription(123) is False
+        task.cancel()
+
+    async def _never_ending():
+        await asyncio.sleep(10)
+
+    asyncio.run(scenario())
+
+
+def test_request_summarization_reserves_the_slot_before_any_task_runs():
+    orchestrator, _ = _make_orchestrator()
+    assert orchestrator.request_summarization(456) is True
+    assert orchestrator.request_summarization(456) is False
+
+
+def test_release_summarization_gives_back_an_unused_reservation():
+    orchestrator, _ = _make_orchestrator()
+    assert orchestrator.request_summarization(456) is True
+    orchestrator.release_summarization(456)
+    assert orchestrator.request_summarization(456) is True
+
+
 # -- Summarization ------------------------------------------------------
 
 
@@ -789,6 +842,46 @@ def test_transcribe_entry_records_usage_from_client_last_usage(tmp_path):
     assert summary["total_calls"] == 1
     assert summary["providers"]["gemini"]["input_tokens"] == 10
     assert summary["providers"]["gemini"]["total_tokens"] == 15
+
+
+def test_record_usage_broadcasts_a_signal_only_message_on_success():
+    # Insights listens for this over the WebSocket to refresh live instead of
+    # requiring a manual reload -- deliberately payload-less (the frontend
+    # re-fetches the authoritative aggregate rather than trying to reconstruct
+    # it from a stream of deltas, which could drift from the server's real
+    # totals across day boundaries).
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    settings_store.update(gemini_api_key="sk-gemini")
+    video_entry = _seed_done_entry(history_store, "/tmp/video.mp4")
+    usage_store = UsageStore()
+
+    orchestrator, broadcasts = _make_orchestrator(
+        history_store=history_store, settings_store=settings_store,
+        usage_store=usage_store, gemini_client_cls=_UsageReportingGeminiClient,
+    )
+    orchestrator._record_usage(
+        _UsageReportingGeminiClient("sk-gemini"), "transcribe_chunk", video_entry["id"]
+    )
+
+    usage_broadcasts = [b for b in broadcasts if b.get("type") == "usage_recorded"]
+    assert usage_broadcasts == [{"type": "usage_recorded"}]
+
+
+def test_record_usage_does_not_broadcast_when_recording_fails():
+    # A DB-write failure already logs and returns early -- must not still
+    # broadcast a "usage changed" signal for a write that never landed.
+    history_store = HistoryStore()
+    settings_store = SettingsStore()
+    usage_store = UsageStore()
+    usage_store.record = _raising_record
+
+    orchestrator, broadcasts = _make_orchestrator(
+        history_store=history_store, settings_store=settings_store, usage_store=usage_store,
+    )
+    orchestrator._record_usage(_UsageReportingGeminiClient("sk-gemini"), "transcribe_chunk", 1)
+
+    assert [b for b in broadcasts if b.get("type") == "usage_recorded"] == []
 
 
 class _PerChunkUsageGeminiClient:

@@ -30,6 +30,8 @@
   --glass-shadow: 0 8px 30px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --input-bg: rgba(0, 0, 0, 0.22);
   --gutter-bg: rgba(0, 0, 0, 0.28);
+  --skeleton-bg: rgba(255, 255, 255, 0.09);
+  --skeleton-sheen: rgba(255, 255, 255, 0.16);
 
   --error: #fb7185;
   --error-bg: rgba(251, 113, 133, 0.12);
@@ -69,6 +71,8 @@
   --glass-shadow: 0 8px 30px rgba(76, 70, 150, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
   --input-bg: rgba(255, 255, 255, 0.55);
   --gutter-bg: rgba(28, 27, 46, 0.04);
+  --skeleton-bg: rgba(28, 27, 46, 0.08);
+  --skeleton-sheen: rgba(255, 255, 255, 0.6);
 
   --error: #dc2626;
   --error-bg: rgba(220, 38, 38, 0.08);
@@ -749,6 +753,240 @@ body::before {
   border-radius: var(--radius-md);
 }
 
+/* Insights dashboard ---------------------------------------------------- */
+
+.insights-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.insights-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.insights-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.insights-range__btn {
+  border-radius: var(--radius-pill);
+  padding: 7px 16px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease);
+}
+
+.insights-range__btn:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.insights-range__btn[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--accent-strong) 0%, var(--accent-strong-2) 100%);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.kpi-tile {
+  padding: 16px 18px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.kpi-tile__value {
+  display: block;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.kpi-tile__label {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-dim);
+}
+
+/* The value-first tiles (hours/videos processed) get the accent treatment
+   -- people don't renew a subscription to see what they spent, they renew
+   to see what they got, so those lead visually too, not just in the API
+   response's key order. */
+.kpi-tile--headline {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(139, 92, 246, 0.14));
+  border-color: transparent;
+}
+
+.kpi-tile--headline .kpi-tile__value {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Free-tier "Videos processed" tile: distinct-video counting needs a query
+   only the Pro-gated dashboard endpoint runs, so this shows a muted "Pro"
+   placeholder instead of a fabricated number. */
+.kpi-tile--locked {
+  opacity: 0.6;
+}
+
+.kpi-tile--locked .kpi-tile__value {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--text-dim);
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.provider-recommendation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(139, 92, 246, 0.16));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.provider-recommendation[hidden] {
+  display: none;
+}
+
+.provider-recommendation__icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.insights-pro-panels {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  /* Explicit, on top of whatever margin the last inner .panel already
+     contributes -- so the gap before "By provider" below is generous and
+     predictable regardless of that panel's own spacing. */
+  margin-bottom: 32px;
+}
+
+.insights-pro-panels.is-locked > .panel {
+  filter: blur(5px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.insights-lock-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: var(--modal-surface-bg);
+  border-radius: var(--radius-lg);
+}
+
+.insights-lock-overlay[hidden] {
+  display: none;
+}
+
+.insights-lock-overlay p {
+  max-width: 320px;
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.insights-chart-panel {
+  min-height: 220px;
+}
+
+.insights-chart {
+  width: 100%;
+  height: 180px;
+}
+
+.insights-chart svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* A quiet "this is live" signal at the trend line's most recent point --
+   solid dot plus an expanding, fading ring pulsing behind it. */
+.chart-live-dot {
+  fill: var(--accent);
+}
+
+.chart-live-dot__ping {
+  fill: var(--accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: chart-live-pulse 2s ease-out infinite;
+}
+
+@keyframes chart-live-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70%,
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-live-dot__ping {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.insights-provider-note {
+  margin: 0;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .urls-editor {
   display: flex;
   align-items: stretch;
@@ -1210,6 +1448,15 @@ input[type="checkbox"] {
 
 .progress-track {
   background: var(--input-bg);
+  /* input-bg is a translucent black (dark theme) / white (light theme), so
+     without a defined edge the empty track can blend into its surroundings
+     in either theme, especially before any accent-colored fill exists to
+     anchor it visually. A border guarantees the track's outline reads in
+     both themes regardless of how close input-bg happens to sit to whatever
+     is behind it. Not overridden by .job-progress .progress-track below (it
+     redeclares background/height but not border), so this covers both
+     progress-bar contexts from one rule. */
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-pill);
   height: 8px;
   overflow: hidden;
@@ -1241,6 +1488,75 @@ input[type="checkbox"] {
   to {
     transform: translateX(100%);
   }
+}
+
+/* The indeterminate bar (unknown total size) already sweeps on its own via
+   .progress-track--indeterminate below -- layering the speed-linked shimmer
+   on top of that would be two competing motions on the same bar. */
+.progress-track--indeterminate .progress-fill::after {
+  display: none;
+}
+
+/* Skeleton loading placeholders ------------------------------------------
+   Shown while a surface's *initial* content is still arriving -- the Queue
+   before its first WebSocket sync, History/Usage/License before their first
+   fetch resolves -- so a view is never left genuinely blank on open. These
+   reuse the same shimmer-sweep keyframe as the download progress bar above
+   (one consistent motion language across the app), just at a lower-contrast
+   sheen so a skeleton reads as a quiet placeholder rather than an active bar. */
+.skeleton {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  background: var(--skeleton-bg);
+  border-radius: var(--radius-sm);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--skeleton-sheen), transparent);
+  transform: translateX(-100%);
+  animation: shimmer-sweep 1.6s ease-in-out infinite;
+}
+
+.skeleton--line {
+  height: 12px;
+  border-radius: var(--radius-pill);
+}
+
+.skeleton--w150 {
+  width: 150px;
+}
+
+.skeleton--title {
+  height: 18px;
+  border-radius: var(--radius-pill);
+}
+
+.skeleton--pill {
+  height: 24px;
+  border-radius: var(--radius-pill);
+}
+
+.skeleton--bar {
+  height: 8px;
+  width: 100%;
+  border-radius: var(--radius-pill);
+}
+
+.skeleton--circle {
+  border-radius: 50%;
+}
+
+/* Skeleton rows reuse their real row's container class (.queue-row /
+   .history-row / .usage-row) for identical framing, so only hover/interaction
+   needs neutralizing while they stand in for not-yet-loaded content. */
+.queue-row--skeleton,
+.history-row--skeleton,
+.usage-row--skeleton {
+  pointer-events: none;
 }
 
 .queue-row__size {
@@ -1398,6 +1714,16 @@ input[type="checkbox"] {
 
 .history-date-heading:not(:first-child) {
   margin-top: 4px;
+}
+
+/* Invisible trigger for revealing the next page of History rows (see
+   setupLoadMoreSentinel in history-view.js) -- needs a real layout box for
+   IntersectionObserver to fire against, but should take up no visible space
+   of its own beyond the list's normal row gap. */
+.history-load-more-sentinel {
+  height: 1px;
+  padding: 0;
+  margin: 0;
 }
 
 .history-row__inner {
@@ -2814,7 +3140,9 @@ input[type="checkbox"] {
   .sidebar__extension-btn,
   .nav-btn__badge::after,
   .icon-btn.is-spinning svg,
-  .queue-row--downloading .progress-fill::after {
+  .queue-row--downloading .progress-fill::after,
+  .progress-track--indeterminate .progress-fill,
+  .skeleton::after {
     animation: none;
   }
   .nav-indicator,

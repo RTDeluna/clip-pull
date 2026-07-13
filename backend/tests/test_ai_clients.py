@@ -98,6 +98,28 @@ def test_transcribe_chunk_raises_ai_client_error_on_network_failure(tmp_path):
 
     assert exc_info.value.provider == "gemini"
     assert exc_info.value.status_code is None
+    # A connection failure never reached the provider at all -- safe to
+    # auto-retry, unlike a timeout (see the test right below).
+    assert exc_info.value.timed_out is False
+
+
+def test_transcribe_chunk_marks_timeout_distinctly_from_connect_failure(tmp_path):
+    # A timeout is ambiguous (the provider may have already received and
+    # started billing the request) so it must be distinguishable from a
+    # plain connection failure -- transcription_errors.is_retryable relies
+    # on this flag to avoid auto-retrying (and potentially double-billing)
+    # a request that might have actually gone through.
+    chunk = tmp_path / "chunk_0000.mp3"
+    chunk.write_bytes(b"fake audio bytes")
+
+    with patch("ai_clients.httpx.post", side_effect=httpx.ReadTimeout("timed out")):
+        client = GeminiTranscriptionClient(api_key="sk-gemini-test")
+        with pytest.raises(AIClientError) as exc_info:
+            client.transcribe_chunk(chunk)
+
+    assert exc_info.value.provider == "gemini"
+    assert exc_info.value.status_code is None
+    assert exc_info.value.timed_out is True
 
 
 def test_transcribe_chunk_raises_ai_client_error_on_malformed_response_shape(tmp_path):
