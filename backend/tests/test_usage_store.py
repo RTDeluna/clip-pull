@@ -150,6 +150,39 @@ def test_daily_breakdown_respects_since_until_range():
     assert [row["date"] for row in rows] == ["2026-03-01"]
 
 
+def test_hourly_breakdown_groups_by_hour():
+    store = UsageStore()
+    store.record(
+        provider="gemini", model="gemini-3.5-flash", operation="transcribe_chunk",
+        input_tokens=100, created_at="2026-01-01 04:00:38",
+    )
+    store.record(
+        provider="gemini", model="gemini-3.5-flash", operation="transcribe_chunk",
+        input_tokens=50, created_at="2026-01-01 04:07:12",
+    )
+    store.record(
+        provider="gemini", model="gemini-3.5-flash", operation="transcribe_chunk",
+        input_tokens=10, created_at="2026-01-01 08:54:52",
+    )
+
+    rows = store.hourly_breakdown()
+
+    by_hour = {row["hour"]: row for row in rows}
+    assert by_hour["2026-01-01 04:00:00"]["input_tokens"] == 150
+    assert by_hour["2026-01-01 04:00:00"]["calls"] == 2
+    assert by_hour["2026-01-01 08:00:00"]["input_tokens"] == 10
+    assert [row["hour"] for row in rows] == ["2026-01-01 04:00:00", "2026-01-01 08:00:00"]  # ascending
+
+
+def test_hourly_breakdown_respects_since_until_range():
+    store = UsageStore()
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 01:00:00")
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 03:00:00")
+
+    rows = store.hourly_breakdown(since="2026-01-01 02:00:00", until="2026-01-01 04:00:00")
+    assert [row["hour"] for row in rows] == ["2026-01-01 03:00:00"]
+
+
 def test_operation_breakdown_groups_by_operation_and_provider():
     store = UsageStore()
     store.record(provider="gemini", model="gemini-3.5-flash", operation="transcribe_chunk", input_tokens=100)

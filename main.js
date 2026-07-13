@@ -5,6 +5,14 @@ const crypto = require("crypto");
 const { spawn, execSync, execFile } = require("child_process");
 const http = require("http");
 
+// This UI is plain DOM/CSS (no video preview, canvas, or WebGL content), so
+// the GPU process Electron otherwise spawns by default buys nothing here but
+// costs 50-100MB+ of RAM on its own. Must be called before the app is ready --
+// as early as possible, hence right at the top of the file. Trades slightly
+// less smooth CSS transitions/animations (ripple.js, charts.js) for a
+// meaningfully smaller baseline memory footprint on a mostly-static UI.
+app.disableHardwareAcceleration();
+
 // Without this, Windows notifications/taskbar grouping fall back to a
 // generic "electron.app.<name>" identity instead of the app's own name —
 // must match electron-builder's "appId" so it lines up with the installed

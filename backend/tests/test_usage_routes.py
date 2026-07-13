@@ -121,6 +121,68 @@ def test_dashboard_pro_returns_full_shape():
     assert body["kpis"]["videos_processed"] == 1
 
 
+def test_dashboard_falls_back_to_hourly_when_all_usage_on_one_day():
+    # A brand-new user's whole history often falls on a single calendar day --
+    # daily_breakdown alone would collapse to one point (no trend line
+    # possible) no matter how many calls they've made. Different hours on
+    # the same day should still produce a real multi-point trend.
+    store = UsageStore()
+    store.record(
+        provider="gemini", operation="transcribe_chunk", input_tokens=100,
+        created_at="2026-01-01 04:00:38",
+    )
+    store.record(
+        provider="gemini", operation="transcribe_chunk", input_tokens=50,
+        created_at="2026-01-01 04:07:12",
+    )
+    store.record(
+        provider="gemini", operation="transcribe_chunk", input_tokens=10,
+        created_at="2026-01-01 08:54:52",
+    )
+    client, _, _ = _make_client(store, pro=True)
+
+    body = client.get("/usage/dashboard?range=all").json()
+
+    assert len(body["daily"]) == 2
+    assert sum(row["input_tokens"] for row in body["daily"]) == 160
+
+
+def test_dashboard_stays_daily_when_multiple_days_present():
+    store = UsageStore()
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 00:00:00")
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-02 00:00:00")
+    client, _, _ = _make_client(store, pro=True)
+
+    body = client.get("/usage/dashboard?range=all").json()
+
+    assert [row["date"] for row in body["daily"]] == ["2026-01-01", "2026-01-02"]
+
+
+def test_dashboard_single_point_even_after_hourly_fallback_stays_single():
+    # All calls genuinely within the same hour -- no finer fallback exists,
+    # so this should still collapse to one point rather than error.
+    store = UsageStore()
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 04:00:10")
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 04:00:40")
+    client, _, _ = _make_client(store, pro=True)
+
+    body = client.get("/usage/dashboard?range=all").json()
+
+    assert len(body["daily"]) == 1
+
+
+def test_dashboard_free_preview_sparkline_uses_hourly_fallback_too():
+    store = UsageStore()
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 04:00:00")
+    store.record(provider="gemini", operation="transcribe_chunk", created_at="2026-01-01 08:00:00")
+    client, _, _ = _make_client(store, pro=False)
+
+    resp = client.get("/usage/dashboard?range=all")
+
+    assert resp.status_code == 402
+    assert len(resp.json()["detail"]["preview"]["trend_sparkline_shape"]) == 2
+
+
 def test_dashboard_range_7d_excludes_older_rows():
     from datetime import datetime, timedelta, timezone
 

@@ -80,6 +80,14 @@ def extract_and_chunk_audio(
     cmd = [
         ffmpeg,
         "-y",
+        # ffmpeg's default loglevel writes a banner plus a running per-second
+        # progress line to stderr -- capture_output below holds all of that in
+        # memory for the whole run, which adds up for a long video even though
+        # only the last 10 lines ever get used (and only on failure, for
+        # logging). Capping it to actual errors keeps that buffer small
+        # without losing anything the failure path below relies on.
+        "-hide_banner",
+        "-loglevel", "error",
         "-i", video_path,
         "-vn",
         "-ac", "1",
