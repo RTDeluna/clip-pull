@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Literal, Optional
@@ -12,6 +13,8 @@ from history_store import HistoryStore
 from queue_manager import QueueManager
 from settings_store import SettingsStore
 from url_validation import parse_url_list
+
+DB_BUSY_MESSAGE = "The app's local database is busy — try again in a moment."
 
 # A generous cap for a course-links paste, not a hard technical limit -- past
 # this, a single batch would grow the in-memory queue and every WS
@@ -68,10 +71,13 @@ def build_queue_router(
             )
         state.referer = request.referer
 
-        previously_downloaded_urls = history_store.was_previously_downloaded(valid_urls)
+        try:
+            previously_downloaded_urls = history_store.was_previously_downloaded(valid_urls)
+            skip_duplicates_setting = settings_store.get()["skip_duplicates"]
+        except sqlite3.OperationalError:
+            raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
         duplicate_urls_in_batch = [u for u in valid_urls if u in previously_downloaded_urls]
 
-        skip_duplicates_setting = settings_store.get()["skip_duplicates"]
         skipped_duplicate_urls: list[str] = []
 
         if skip_duplicates_setting and duplicate_urls_in_batch:

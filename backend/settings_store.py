@@ -12,6 +12,13 @@ DEFAULT_SETTINGS = {
     "default_output_folder": None,
     "gemini_api_key": None,
     "anthropic_api_key": None,
+    "openai_api_key": None,
+    "groq_api_key": None,
+    "openrouter_api_key": None,
+    "transcription_provider": "gemini",
+    "summarization_provider": "anthropic",
+    "auto_transcribe_on_download": False,
+    "auto_summarize_after_transcribe": False,
 }
 
 
@@ -38,6 +45,13 @@ class SettingsStore:
             "default_output_folder": row["default_output_folder"],
             "gemini_api_key": row["gemini_api_key"],
             "anthropic_api_key": row["anthropic_api_key"],
+            "openai_api_key": row["openai_api_key"],
+            "groq_api_key": row["groq_api_key"],
+            "openrouter_api_key": row["openrouter_api_key"],
+            "transcription_provider": row["transcription_provider"],
+            "summarization_provider": row["summarization_provider"],
+            "auto_transcribe_on_download": bool(row["auto_transcribe_on_download"]),
+            "auto_summarize_after_transcribe": bool(row["auto_summarize_after_transcribe"]),
         }
 
     def update(self, **changes) -> dict:

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from unittest.mock import patch
 
@@ -6,12 +7,16 @@ from fastapi.testclient import TestClient
 
 from history_store import HistoryStore
 from history_routes import build_history_router
+from license_store import LicenseStore
 
 
-def _make_client():
+def _make_client(pro=False):
     store = HistoryStore()
+    license_store = LicenseStore()
+    if pro:
+        license_store.set_active(license_key="TEST-PRO-KEY", purchase_email=None)
     app = FastAPI()
-    app.include_router(build_history_router(store))
+    app.include_router(build_history_router(store, license_store))
     return TestClient(app), store
 
 
@@ -27,6 +32,49 @@ def test_get_history_returns_recorded_entries():
     entries = response.json()["entries"]
     assert len(entries) == 1
     assert entries[0]["url"] == "https://vimeo.com/1"
+
+
+def test_get_history_strips_key_points_and_chapters_for_free_user():
+    client, store = _make_client(pro=False)
+    entry = store.record(
+        entry_id="e1", batch_id="b1", url="https://vimeo.com/1", title="Video 1",
+        output_path="C:/downloads/Video 1.mp4", total_size="10MB",
+        status="done", error_reason=None, retry_count=0,
+    )
+    store.update_summary(
+        entry["id"], status="done",
+        summary=json.dumps({
+            "tldr": "A short summary.",
+            "key_points": [{"seconds": 5, "text": "A point"}],
+            "chapters": [{"seconds": 0, "title": "Intro"}],
+        }),
+    )
+    response = client.get("/history")
+    summary = json.loads(response.json()["entries"][0]["summary"])
+    assert summary["tldr"] == "A short summary."
+    assert summary["key_points"] == []
+    assert summary["chapters"] == []
+
+
+def test_get_history_includes_key_points_and_chapters_for_pro_user():
+    client, store = _make_client(pro=True)
+    entry = store.record(
+        entry_id="e1", batch_id="b1", url="https://vimeo.com/1", title="Video 1",
+        output_path="C:/downloads/Video 1.mp4", total_size="10MB",
+        status="done", error_reason=None, retry_count=0,
+    )
+    store.update_summary(
+        entry["id"], status="done",
+        summary=json.dumps({
+            "tldr": "A short summary.",
+            "key_points": [{"seconds": 5, "text": "A point"}],
+            "chapters": [{"seconds": 0, "title": "Intro"}],
+        }),
+    )
+    response = client.get("/history")
+    summary = json.loads(response.json()["entries"][0]["summary"])
+    assert summary["key_points"] == [{"seconds": 5, "text": "A point"}]
+    assert summary["chapters"] == [{"seconds": 0, "title": "Intro"}]
 
 
 def test_get_history_filters_by_query_param():

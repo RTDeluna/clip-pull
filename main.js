@@ -1,7 +1,7 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { spawn, exec, execSync } = require("child_process");
+const { spawn, execSync, execFile } = require("child_process");
 const http = require("http");
 
 // Without this, Windows notifications/taskbar grouping fall back to a
@@ -166,73 +166,191 @@ ipcMain.handle("reveal-file", (_, filePath) => {
   }
 });
 
-function execCommand(command) {
+// Routed through the main process instead of the renderer's own
+// navigator.clipboard.writeText: the web Clipboard API requires the
+// document to be focused and rejects with "Document is not focused"
+// whenever DevTools or another window has focus instead — which happens
+// often enough in normal use to make copy buttons unreliable. Electron's
+// native clipboard module has no such requirement.
+ipcMain.handle("copy-text", (_, text) => {
+  clipboard.writeText(text);
+});
+
+function queryRegistry(args) {
   return new Promise((resolve, reject) => {
-    // Without a timeout, a hung reg.exe/browser launch would await forever
-    // here — hanging the open-chrome-extensions IPC handler (and the
-    // button that calls it) permanently, with no way to recover short of
-    // restarting the app.
-    exec(command, { timeout: 5000 }, (error, stdout) => {
+    // Without a timeout, a hung reg.exe would await forever here, hanging
+    // the open-chrome-extensions IPC handler (and the button that calls it)
+    // permanently with no way to recover short of restarting the app.
+    // execFile (no shell) rather than exec: the returned value ends up in a
+    // launch command we later spawn, so this avoids any shell-quoting risk
+    // at the lookup stage too.
+    execFile("reg.exe", args, { timeout: 5000 }, (error, stdout) => {
       if (error) reject(error);
       else resolve(stdout);
     });
   });
 }
 
+// Splits a registry "shell\open\command" value -- typically
+// `"C:\Program Files\Browser\browser.exe" --single-argument %1` -- into an
+// executable path and argument list, so the browser can be launched via
+// spawn(exe, args) instead of a shell string. That sidesteps any quoting
+// ambiguity in the registry value and matches how Windows itself would
+// invoke it for a URL click.
+function parseShellCommand(command) {
+  const quotedMatch = command.match(/^"([^"]+)"\s*(.*)$/);
+  let exe;
+  let rest;
+  if (quotedMatch) {
+    [, exe, rest] = quotedMatch;
+  } else {
+    const spaceIdx = command.indexOf(" ");
+    exe = spaceIdx === -1 ? command : command.slice(0, spaceIdx);
+    rest = spaceIdx === -1 ? "" : command.slice(spaceIdx + 1);
+  }
+  const args = rest.trim().length ? rest.trim().split(/\s+/) : [];
+  return { exe, args };
+}
+
+// Tried before ever falling back to "whatever the default browser is": the
+// extension is explicitly a Chrome extension and the UI's own copy says
+// "Install in Chrome", so if Chrome is actually installed, that's what
+// should open -- regardless of whether Edge (Windows' out-of-box default)
+// is the system default browser. Standard installer locations only; if
+// Chrome was installed somewhere nonstandard this simply falls through to
+// getDefaultBrowserLaunch below, same as if Chrome weren't installed.
+function getChromeExecutablePath() {
+  const candidates = [
+    process.env["PROGRAMFILES"] && path.join(process.env["PROGRAMFILES"], "Google\\Chrome\\Application\\chrome.exe"),
+    process.env["PROGRAMFILES(X86)"] && path.join(process.env["PROGRAMFILES(X86)"], "Google\\Chrome\\Application\\chrome.exe"),
+    process.env["LOCALAPPDATA"] && path.join(process.env["LOCALAPPDATA"], "Google\\Chrome\\Application\\chrome.exe"),
+  ];
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
+}
+
+// On a cold start (Chrome not already running) with multiple profiles
+// configured -- or "Ask which profile to use" enabled -- launching chrome.exe
+// with just a URL argument shows the "Who's using Chrome?" picker instead of
+// navigating there. The picker is a separate, short-lived process; the URL
+// from the original command line doesn't reliably carry over to whichever
+// profile the user then picks, so the browser opens to a blank/default tab
+// instead. Chrome records which profile was last active in its own Local
+// State file -- passing that back via --profile-directory tells Chrome
+// exactly which profile to open, skipping the picker (and the URL loss)
+// entirely. Returns null (silently) on any read/parse failure, including a
+// brand new Chrome install with no Local State file yet.
+function getChromeLastProfileDirectory() {
+  if (!process.env["LOCALAPPDATA"]) return null;
+  const localStatePath = path.join(
+    process.env["LOCALAPPDATA"], "Google\\Chrome\\User Data\\Local State"
+  );
+  try {
+    const parsed = JSON.parse(fs.readFileSync(localStatePath, "utf8"));
+    const lastUsed = parsed?.profile?.last_used;
+    return typeof lastUsed === "string" && lastUsed ? lastUsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// Catches Chrome installs the standard-path guesses above miss (custom
+// install directory, some enterprise/portable deployments) -- App Paths is
+// how Windows itself resolves a bare "chrome.exe" regardless of where it
+// was actually installed, so it's a more reliable second attempt than
+// guessing more folder paths.
+async function getChromeExecutablePathFromAppPaths() {
+  try {
+    const output = await queryRegistry([
+      "query",
+      "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe",
+      "/ve",
+    ]);
+    const match = output.match(/REG_SZ\s+(.+)/);
+    const exePath = match ? match[1].trim() : null;
+    return exePath && fs.existsSync(exePath) ? exePath : null;
+  } catch {
+    return null;
+  }
+}
+
 // chrome:// isn't a registered OS protocol on Windows (by design — it would
 // let any app deep-link into a browser's internal pages), so
 // shell.openExternal() can't hand it to "the default browser": Windows just
 // shows a "no app can open this link" dialog. To actually reach the browser
-// the user picked in Settings > Default apps, look up that browser's own
-// registered launch command and invoke it directly with the URL as an
-// argument — the browser then interprets its own chrome://-style scheme
-// itself, the way it would if the user typed it into the address bar.
-async function getWindowsDefaultBrowserLaunchCommand() {
+// the user picked in Settings > Default apps -- Chrome, Brave, Edge,
+// whatever -- look up that browser's own registered launch command and
+// invoke it directly with the URL as an argument; the browser then
+// interprets its own chrome://-style scheme itself, the way it would if the
+// user typed it into the address bar.
+async function getDefaultBrowserLaunch() {
   // Primary source: the explicit choice from Settings > Default apps, if
   // the user ever went through that picker.
+  let progId = null;
   try {
-    const progIdOutput = await execCommand(
-      'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Shell\\Associations\\UrlAssociations\\http\\UserChoice" /v ProgId'
-    );
+    const progIdOutput = await queryRegistry([
+      "query",
+      "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Shell\\Associations\\UrlAssociations\\http\\UserChoice",
+      "/v",
+      "ProgId",
+    ]);
     const progIdMatch = progIdOutput.match(/ProgId\s+REG_SZ\s+(\S+)/);
-    const progId = progIdMatch && progIdMatch[1];
-    // ProgIds are short identifiers like "ChromeHTML" or "MSEdgeHTM" — never
-    // contain spaces or shell metacharacters. Reject anything else rather
-    // than interpolate it into the next reg query command.
-    if (progId && /^[\w.-]+$/.test(progId)) {
-      const commandOutput = await execCommand(`reg query "HKCR\\${progId}\\shell\\open\\command" /ve`);
-      const commandMatch = commandOutput.match(/REG_SZ\s+(.+)/);
-      if (commandMatch) return commandMatch[1].trim();
-    }
+    progId = progIdMatch && progIdMatch[1];
   } catch {
     // No UserChoice recorded (e.g. never set via the picker) — fall
     // through to the classic association below.
   }
 
-  // Fallback: HKCR\http is the classic protocol association Windows keeps
-  // pointed at the effective default browser even without an explicit
-  // UserChoice, so this resolves on machines where the picker was never used.
-  const commandOutput = await execCommand('reg query "HKCR\\http\\shell\\open\\command" /ve');
+  // ProgIds are short identifiers like "ChromeHTML" or "BraveHTML" — never
+  // contain spaces or registry-path metacharacters. Reject anything else
+  // rather than interpolate it into the next reg query's key path.
+  const key =
+    progId && /^[\w.-]+$/.test(progId)
+      ? `HKCR\\${progId}\\shell\\open\\command`
+      // Fallback: HKCR\http is the classic protocol association Windows
+      // keeps pointed at the effective default browser even without an
+      // explicit UserChoice, so this resolves on machines where the picker
+      // was never used.
+      : "HKCR\\http\\shell\\open\\command";
+  const commandOutput = await queryRegistry(["query", key, "/ve"]);
   const commandMatch = commandOutput.match(/REG_SZ\s+(.+)/);
-  return commandMatch ? commandMatch[1].trim() : null;
+  return commandMatch ? parseShellCommand(commandMatch[1].trim()) : null;
 }
 
 ipcMain.handle("open-chrome-extensions", async () => {
   const url = "chrome://extensions";
   if (process.platform === "win32") {
+    const chromePath = getChromeExecutablePath() || (await getChromeExecutablePathFromAppPaths());
+    if (chromePath) {
+      try {
+        const lastProfile = getChromeLastProfileDirectory();
+        const args = lastProfile ? [`--profile-directory=${lastProfile}`, url] : [url];
+        spawn(chromePath, args, { detached: true, stdio: "ignore" }).unref();
+        return { ok: true };
+      } catch (error) {
+        console.error("Could not launch Chrome directly:", error);
+        // Fall through to the default-browser resolution below.
+      }
+    }
     try {
-      const launchTemplate = await getWindowsDefaultBrowserLaunchCommand();
-      if (launchTemplate) {
-        const launchCommand = launchTemplate.includes("%1")
-          ? launchTemplate.replace("%1", url)
-          : `${launchTemplate} "${url}"`;
-        await execCommand(launchCommand);
+      const browser = await getDefaultBrowserLaunch();
+      if (browser?.exe) {
+        const args = browser.args.some((arg) => arg.includes("%1"))
+          ? browser.args.map((arg) => arg.replace("%1", url))
+          : [...browser.args, url];
+        spawn(browser.exe, args, { detached: true, stdio: "ignore" }).unref();
         return { ok: true };
       }
     } catch (error) {
       console.error("Could not launch the default browser directly:", error);
-      // Fall through to the generic attempt below.
     }
+    // Both explicit resolution paths failed. shell.openExternal() is
+    // deliberately NOT tried as a last resort here: per the comment above
+    // getDefaultBrowserLaunch, chrome:// isn't a registered OS protocol on
+    // Windows, so ShellExecute resolves "successfully" while opening
+    // nothing visible -- reporting ok:true here would silently lie to the
+    // caller and skip the renderer's copy-to-clipboard fallback that's
+    // supposed to catch exactly this case.
+    return { ok: false, error: "no_browser_found" };
   }
   try {
     await shell.openExternal(url);
@@ -248,6 +366,12 @@ ipcMain.handle("open-chrome-extensions", async () => {
 const ALLOWED_EXTERNAL_URLS = new Set([
   "https://aistudio.google.com/app/apikey",
   "https://console.anthropic.com/settings/keys",
+  "https://platform.openai.com/api-keys",
+  "https://console.groq.com/keys",
+  "https://openrouter.ai/settings/keys",
+  // Placeholder Gumroad Pro product URL (matches CLIP_PULL_GUMROAD_PERMALINK's
+  // placeholder default) -- update to the real product URL once it exists.
+  "https://gumroad.com/l/clippull-pro-placeholder",
 ]);
 
 ipcMain.handle("open-external", async (_, url) => {

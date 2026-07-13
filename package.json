@@ -12,7 +12,8 @@
     "dist": "npm run fetch:ffmpeg && npm run build:backend && npm run build:extension && electron-builder",
     "release:patch": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump patch",
     "release:minor": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump minor",
-    "release:major": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump major"
+    "release:major": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Bump major",
+    "lint:py": "ruff check backend"
   },
   "devDependencies": {
     "electron": "^33.2.0",

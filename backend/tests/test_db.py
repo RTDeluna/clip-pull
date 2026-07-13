@@ -88,9 +88,21 @@ def test_history_summary_status_defaults_to_none_independently_of_transcript_sta
 def test_settings_table_has_api_key_columns():
     conn = get_connection(":memory:")
     columns = _column_names(conn, "settings")
-    assert {"gemini_api_key", "anthropic_api_key"} <= columns
-    assert "openai_api_key" not in columns
-    assert "openrouter_api_key" not in columns
+    assert {
+        "gemini_api_key", "anthropic_api_key", "openai_api_key",
+        "groq_api_key", "openrouter_api_key",
+    } <= columns
+
+
+def test_settings_table_has_provider_selection_columns_with_defaults():
+    conn = get_connection(":memory:")
+    columns = _column_names(conn, "settings")
+    assert {"transcription_provider", "summarization_provider"} <= columns
+    conn.execute("INSERT INTO settings (id) VALUES (1)")
+    conn.commit()
+    row = conn.execute("SELECT * FROM settings WHERE id = 1").fetchone()
+    assert row["transcription_provider"] == "gemini"
+    assert row["summarization_provider"] == "anthropic"
 
 
 def test_migration_v5_preserves_existing_key_value_under_new_column_name(tmp_path):

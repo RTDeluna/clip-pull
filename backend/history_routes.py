@@ -3,12 +3,13 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from history_store import HistoryStore
+from history_store import HistoryStore, redact_pro_summary_fields
+from license_store import LicenseStore
 
 DB_BUSY_MESSAGE = "The app's local database is busy — try again in a moment."
 
 
-def build_history_router(history_store: HistoryStore) -> APIRouter:
+def build_history_router(history_store: HistoryStore, license_store: LicenseStore) -> APIRouter:
     router = APIRouter()
 
     @router.get("/history")
@@ -22,6 +23,8 @@ def build_history_router(history_store: HistoryStore) -> APIRouter:
             entries = history_store.search(query=q, status=status, limit=limit, offset=offset)
         except sqlite3.OperationalError:
             raise HTTPException(status_code=503, detail=DB_BUSY_MESSAGE)
+        is_pro = license_store.is_pro()
+        entries = [redact_pro_summary_fields(entry, is_pro) for entry in entries]
         return {"entries": entries}
 
     @router.delete("/history/{entry_id}")

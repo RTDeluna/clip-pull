@@ -1,15 +1,26 @@
 import asyncio
+import functools
+import json
 import logging
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from ai_clients import AIClientError, AnthropicClient, GeminiTranscriptionClient
+from ai_clients import (
+    PROVIDER_API_KEY_SETTINGS,
+    PROVIDER_DISPLAY_NAMES,
+    PROVIDER_INDEFINITE_ARTICLES,
+    SUMMARIZATION_CLIENTS,
+    TRANSCRIPTION_CLIENTS,
+    AIClientError,
+)
 from audio_extraction import AudioExtractionError, extract_and_chunk_audio
-from history_store import HistoryStore
+from history_store import HistoryStore, redact_pro_summary_fields
+from license_store import LicenseStore
 from settings_store import SettingsStore
 from transcription_errors import humanize_transcription_error, is_retryable
+from usage_store import UsageStore
 
 logger = logging.getLogger("clippull")
 
@@ -25,10 +36,31 @@ MAX_CONCURRENT_SUMMARIES = 4
 CHUNK_RETRY_ATTEMPTS = 3
 CHUNK_RETRY_BACKOFF_SECONDS = 2.0
 
+# Rough guardrail on how much transcript text we hand a summarization model in
+# one call -- a very long transcript is both a token-cost and a context-window
+# risk. This isn't exact token math (chars per token varies by model), just a
+# conservative ceiling past which we truncate rather than send an unbounded
+# amount. Roughly ~15k tokens of English at 4 chars/token.
+MAX_SUMMARY_TRANSCRIPT_CHARS = 60000
+# "Chat with your lesson" hands the model the same transcript as context, so it
+# faces the exact same token-cost/context-window risk -- reuse the summary
+# ceiling verbatim rather than picking a second arbitrary number.
+MAX_CHAT_TRANSCRIPT_CHARS = MAX_SUMMARY_TRANSCRIPT_CHARS
+
 # Transcription and summarization are independent, separately-triggered
 # jobs (see TranscriptionOrchestrator) -- each gets its own WS message type
 # so the frontend never has to guess which job a given update belongs to.
 JOB_MESSAGE_TYPES = {"transcript": "transcript_update", "summary": "summary_update"}
+
+
+def truncate_transcript(transcript_text: str, max_chars: int = MAX_SUMMARY_TRANSCRIPT_CHARS) -> str:
+    """Caps how much transcript text we hand a summarization/chat model in one
+    call (see MAX_SUMMARY_TRANSCRIPT_CHARS). Appends a marker so the model knows
+    the text was cut rather than genuinely ending there. Single source of the
+    truncation policy, shared by summarize_entry and the chat route."""
+    if len(transcript_text) <= max_chars:
+        return transcript_text
+    return transcript_text[:max_chars] + "\n\n[Transcript truncated for length.]"
 
 
 def format_timestamp(total_seconds: float) -> str:
@@ -65,14 +97,83 @@ def stitch_transcript(chunk_results: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _strip_code_fence(text: str) -> str:
+    """Removes a wrapping markdown code fence if present. Some models wrap the
+    JSON in ```json ... ``` despite being told not to -- a simple, defensive
+    strip (not a full markdown parser) is enough to recover the raw object."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    # Drop the opening fence line (```json / ``` / ```JSON etc.)...
+    lines = lines[1:]
+    # ...and the closing fence line if there is one.
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def parse_structured_notes(raw_text: str) -> dict:
+    """Parses a summarization model's response into the normalized structured
+    notes shape:
+        {"tldr": str, "key_points": [{"seconds": float, "text": str}],
+         "chapters": [{"seconds": float, "title": str}]}
+    Malformed key_points/chapters entries are dropped individually rather than
+    failing the whole response. On ANY failure to parse a valid object with a
+    string `tldr`, falls back to treating the entire raw response as the TL;DR
+    (with empty key_points/chapters) -- guaranteeing every stored summary value
+    is valid JSON with this schema while degrading gracefully to "just show the
+    text" when the model didn't cooperate."""
+    fallback = {"tldr": raw_text.strip(), "key_points": [], "chapters": []}
+    try:
+        parsed = json.loads(_strip_code_fence(raw_text))
+    except (ValueError, TypeError):
+        return fallback
+    if not isinstance(parsed, dict):
+        return fallback
+    tldr = parsed.get("tldr")
+    if not isinstance(tldr, str):
+        return fallback
+
+    return {
+        "tldr": tldr,
+        "key_points": _normalize_timestamped_items(parsed.get("key_points"), "text"),
+        "chapters": _normalize_timestamped_items(parsed.get("chapters"), "title"),
+    }
+
+
+def _normalize_timestamped_items(items: object, text_key: str) -> list[dict]:
+    """Keeps only well-formed {seconds, <text_key>} entries from a list, coercing
+    `seconds` to a float and requiring the text field to be a string. Anything
+    malformed (missing keys, non-numeric seconds, wrong type) is dropped rather
+    than failing the whole parse."""
+    if not isinstance(items, list):
+        return []
+    normalized: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = item.get(text_key)
+        if not isinstance(value, str):
+            continue
+        try:
+            seconds = float(item["seconds"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        normalized.append({"seconds": seconds, text_key: value})
+    return normalized
+
+
 class TranscriptionOrchestrator:
     def __init__(
         self,
         history_store: HistoryStore,
         settings_store: SettingsStore,
+        usage_store: UsageStore,
+        license_store: LicenseStore,
         broadcast: Optional[Callable[[dict], None]] = None,
-        gemini_client_cls=GeminiTranscriptionClient,
-        anthropic_client_cls=AnthropicClient,
+        transcription_client_classes: Optional[dict] = None,
+        summarization_client_classes: Optional[dict] = None,
         extract_fn: Callable[..., list] = extract_and_chunk_audio,
         max_concurrent_jobs: int = MAX_CONCURRENT_TRANSCRIPTIONS,
         max_concurrent_chunks: int = MAX_CONCURRENT_CHUNK_TRANSCRIPTIONS,
@@ -80,9 +181,11 @@ class TranscriptionOrchestrator:
     ):
         self.history_store = history_store
         self.settings_store = settings_store
+        self.usage_store = usage_store
+        self.license_store = license_store
         self.broadcast = broadcast or (lambda message: None)
-        self.gemini_client_cls = gemini_client_cls
-        self.anthropic_client_cls = anthropic_client_cls
+        self.transcription_client_classes = transcription_client_classes or TRANSCRIPTION_CLIENTS
+        self.summarization_client_classes = summarization_client_classes or SUMMARIZATION_CLIENTS
         self.extract_fn = extract_fn
         self.max_concurrent_chunks = max_concurrent_chunks
         self._transcription_semaphore = asyncio.Semaphore(max_concurrent_jobs)
@@ -115,8 +218,29 @@ class TranscriptionOrchestrator:
         if percent is not None:
             message["percent"] = percent
         if entry is not None:
-            message["entry"] = entry
+            # A row can carry a summary from a previous job even on a
+            # "transcript" broadcast (e.g. re-transcribing a video that was
+            # already summarized before), so this redacts unconditionally
+            # rather than only for job == "summary".
+            message["entry"] = redact_pro_summary_fields(entry, self.license_store.is_pro())
         self.broadcast(message)
+
+    def _record_usage(self, client, operation: str, history_id: Optional[int] = None) -> None:
+        """Best-effort usage telemetry. Reads the client's `last_usage` side
+        channel (set on its last successful call, keys lining up 1:1 with
+        UsageStore.record's kwargs) and appends a row. `history_id` is None for
+        course-scoped calls (course_chat/course_digest), which aren't tied to a
+        single entry -- ai_usage.history_id is nullable, so that records fine. A
+        failure here must NEVER interrupt the real transcription/summarization
+        job -- it's wrapped and only logged, exactly like the other best-effort
+        steps in this file."""
+        usage = getattr(client, "last_usage", None)
+        if not usage:
+            return
+        try:
+            self.usage_store.record(operation=operation, history_id=history_id, **usage)
+        except Exception:
+            logger.exception("Failed to record AI usage for history entry %s", history_id)
 
     # -- Transcription --------------------------------------------------
 
@@ -166,19 +290,29 @@ class TranscriptionOrchestrator:
                     return
 
                 settings = self.settings_store.get()
-                gemini_key = settings.get("gemini_api_key")
-                if not gemini_key:
+                provider = settings.get("transcription_provider") or "gemini"
+                client_cls = self.transcription_client_classes.get(provider)
+                if client_cls is None:
+                    self._fail_transcription(
+                        history_id, f"Unknown transcription provider configured: {provider}."
+                    )
+                    return
+                display_name = PROVIDER_DISPLAY_NAMES.get(provider, provider)
+                article = PROVIDER_INDEFINITE_ARTICLES.get(provider, "a")
+                api_key = settings.get(PROVIDER_API_KEY_SETTINGS[provider])
+                if not api_key:
                     self._fail_transcription(
                         history_id,
-                        "Add a Gemini API key in Settings to enable transcription.",
+                        f"Add {article} {display_name} API key in Settings to enable transcription.",
                     )
                     return
 
                 self._broadcast(history_id, "transcript", "running", "Extracting audio…")
                 work_dir = tempfile.mkdtemp(prefix="clippull_transcribe_")
                 try:
+                    extract_for_provider = functools.partial(self.extract_fn, provider=provider)
                     chunks = await loop.run_in_executor(
-                        None, self.extract_fn, entry["output_path"], work_dir
+                        None, extract_for_provider, entry["output_path"], work_dir
                     )
                 except AudioExtractionError as exc:
                     self._fail_transcription(history_id, humanize_transcription_error(exc))
@@ -186,7 +320,7 @@ class TranscriptionOrchestrator:
 
                 try:
                     chunk_results = await self._transcribe_chunks(
-                        history_id, chunks, gemini_key, loop
+                        history_id, chunks, client_cls, api_key, loop
                     )
                 except AIClientError as exc:
                     self._fail_transcription(history_id, humanize_transcription_error(exc))
@@ -208,9 +342,22 @@ class TranscriptionOrchestrator:
             self._active_transcription_tasks.pop(history_id, None)
 
     async def _transcribe_chunks(
-        self, history_id: int, chunks: list[Path], gemini_key: str, loop: asyncio.AbstractEventLoop
+        self,
+        history_id: int,
+        chunks: list[Path],
+        client_cls,
+        api_key: str,
+        loop: asyncio.AbstractEventLoop,
     ) -> list[dict]:
-        gemini_client = self.gemini_client_cls(gemini_key)
+        # A fresh client instance is constructed per chunk (below) rather
+        # than sharing one across all concurrently-running chunks --
+        # transcribe_chunk() records its token/duration usage on the
+        # instance's own `last_usage` attribute, and with up to
+        # max_concurrent_chunks chunks in flight at once on a *shared*
+        # client, one chunk's usage could be overwritten by another's
+        # before _record_usage reads it back (a real race that silently
+        # corrupted the usage dashboard's numbers). Construction is cheap
+        # (just stores the api_key), so this costs nothing meaningful.
         chunk_semaphore = asyncio.Semaphore(self.max_concurrent_chunks)
         total = len(chunks)
         completed = 0
@@ -223,12 +370,14 @@ class TranscriptionOrchestrator:
                     f"Transcribing chunk {index + 1}/{total}…",
                     percent=round(completed / total * 100),
                 )
+                client = client_cls(api_key)
                 last_exc: Optional[AIClientError] = None
                 for attempt in range(CHUNK_RETRY_ATTEMPTS):
                     try:
                         result = await loop.run_in_executor(
-                            None, gemini_client.transcribe_chunk, chunk_path
+                            None, client.transcribe_chunk, chunk_path
                         )
+                        self._record_usage(client, "transcribe_chunk", history_id)
                         completed += 1
                         self._broadcast(
                             history_id, "transcript", "running",
@@ -283,27 +432,43 @@ class TranscriptionOrchestrator:
                     return
 
                 settings = self.settings_store.get()
-                anthropic_key = settings.get("anthropic_api_key")
-                if not anthropic_key:
+                provider = settings.get("summarization_provider") or "anthropic"
+                client_cls = self.summarization_client_classes.get(provider)
+                if client_cls is None:
+                    self._fail_summarization(
+                        history_id, f"Unknown summarization provider configured: {provider}."
+                    )
+                    return
+                display_name = PROVIDER_DISPLAY_NAMES.get(provider, provider)
+                article = PROVIDER_INDEFINITE_ARTICLES.get(provider, "a")
+                api_key = settings.get(PROVIDER_API_KEY_SETTINGS[provider])
+                if not api_key:
                     self._fail_summarization(
                         history_id,
-                        "Add an Anthropic API key in Settings to enable summaries.",
+                        f"Add {article} {display_name} API key in Settings to enable summaries.",
                     )
                     return
 
                 self._broadcast(history_id, "summary", "running", "Summarizing…")
                 loop = asyncio.get_running_loop()
+                transcript_text = truncate_transcript(entry["transcript"])
                 try:
-                    anthropic_client = self.anthropic_client_cls(anthropic_key)
+                    client = client_cls(api_key)
                     summary_text = await loop.run_in_executor(
-                        None, anthropic_client.summarize, entry["transcript"]
+                        None, client.summarize, transcript_text
                     )
+                    self._record_usage(client, "summarize", history_id)
                 except AIClientError as exc:
                     self._fail_summarization(history_id, humanize_transcription_error(exc))
                     return
 
+                # The `summary` column stays plain TEXT; we just store a JSON
+                # string of the normalized structured-notes shape inside it, so
+                # no DB migration is needed. Pre-existing rows keep their old
+                # plain-prose summaries -- readers handle both.
+                structured = parse_structured_notes(summary_text)
                 updated = self.history_store.update_summary(
-                    history_id, status="done", summary=summary_text
+                    history_id, status="done", summary=json.dumps(structured)
                 )
                 self._broadcast(history_id, "summary", "done", percent=100, entry=updated)
         except Exception:
@@ -313,3 +478,30 @@ class TranscriptionOrchestrator:
             )
         finally:
             self._active_summarization_tasks.pop(history_id, None)
+
+    # -- Auto-process / batch chaining ------------------------------------
+
+    async def transcribe_and_maybe_summarize(
+        self, history_id: int, summarize: bool = False
+    ) -> None:
+        """Transcribes an entry and, only if `summarize` is set AND the
+        transcription actually succeeded, chains a summarization right after.
+        This is the shared task body behind both the auto-transcribe-on-download
+        trigger (main.py) and the batch-process action (transcription_routes) --
+        neither reimplements the request/mark/summarize dance, they just call
+        this. The chained summary reuses request_summarization/
+        mark_summarization_running exactly like the manual summarize route, so a
+        summary already in flight is never double-started. transcribe_entry and
+        summarize_entry each own their full try/except + row-failure handling,
+        so a failure in either simply leaves that entry marked 'error' and (for
+        a failed transcription) skips the summary rather than raising."""
+        await self.transcribe_entry(history_id)
+        if not summarize:
+            return
+        entry = self.history_store.get(history_id)
+        if entry is None or entry.get("transcript_status") != "done":
+            return  # transcription failed (or the row is gone) -- nothing to summarize
+        if not self.request_summarization(history_id):
+            return
+        self.mark_summarization_running(history_id)
+        await self.summarize_entry(history_id)

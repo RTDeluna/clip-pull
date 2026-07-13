@@ -229,6 +229,12 @@ def humanize_error_reason(exc: Exception) -> str:
     for pattern, friendly in FRIENDLY_ERROR_RULES:
         if pattern.search(raw):
             return friendly
+    # A non-empty unmatched message is still shown as-is (it may carry a
+    # genuinely useful yt-dlp/OS detail) -- but some exceptions stringify to
+    # nothing at all (e.g. a bare raise with no message), which would leave
+    # the user staring at a blank error. Fall back to a generic line then.
+    if not raw.strip():
+        return "Something went wrong during this download. Check the log for details."
     return raw
 
 

@@ -1,4 +1,4 @@
-const RIPPLE_TARGETS = ".btn, .tab-btn, .retry-btn, .theme-toggle";
+const RIPPLE_TARGETS = ".btn, .nav-btn, .retry-btn, .theme-toggle, .sidebar__collapse-btn";
 
 function spawnRipple(btn, clientX, clientY) {
   const rect = btn.getBoundingClientRect();

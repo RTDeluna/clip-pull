@@ -47,7 +47,7 @@ downloadBtn.addEventListener("click", async () => {
   }
 });
 
-chromeExtensionsCode.addEventListener("click", async () => {
+async function openChromeExtensions() {
   try {
     const result = await window.api.openChromeExtensions();
     if (!result?.ok) {
@@ -56,12 +56,27 @@ chromeExtensionsCode.addEventListener("click", async () => {
     showToast("Opening chrome://extensions in your browser…", "success");
   } catch {
     try {
-      await navigator.clipboard.writeText(chromeExtensionsCode.textContent);
+      await window.api.copyText(chromeExtensionsCode.textContent);
       showToast("Couldn't open automatically — copied to clipboard instead", "warning");
     } catch {
       showToast("Failed to open or copy", "error");
     }
   }
+}
+
+chromeExtensionsCode.addEventListener("click", (event) => {
+  event.preventDefault();
+  openChromeExtensions();
+});
+chromeExtensionsCode.addEventListener("keydown", (event) => {
+  if (event.key === " ") {
+    event.preventDefault();
+    openChromeExtensions();
+  }
 });
 
 refreshPackageInfo();
+// The popup can be opened repeatedly without a page reload -- re-check status
+// each time instead of relying on the one-time check above, so it doesn't go
+// stale if the extension zip gets (re)built while the app is running.
+document.addEventListener("clippull:extension-popup-opened", refreshPackageInfo);

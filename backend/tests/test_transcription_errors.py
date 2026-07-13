@@ -66,6 +66,14 @@ def test_humanize_transcription_error_rewrites_network_failure():
     assert "Couldn't reach Gemini" in reason
 
 
+def test_humanize_transcription_error_names_new_providers_correctly():
+    for provider, expected_name in [("openai", "OpenAI"), ("groq", "Groq"), ("openrouter", "OpenRouter")]:
+        exc = AIClientError("unauthorized", provider=provider, status_code=401)
+        reason = humanize_transcription_error(exc)
+        assert expected_name in reason
+        assert "rejected the API key" in reason
+
+
 def test_humanize_transcription_error_falls_back_for_unmapped_status():
     exc = AIClientError("teapot", provider="anthropic", status_code=418)
     reason = humanize_transcription_error(exc)

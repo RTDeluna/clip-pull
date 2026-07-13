@@ -1,4 +1,6 @@
-from history_store import HistoryStore
+import json
+
+from history_store import HistoryStore, redact_pro_summary_fields
 
 
 def _record(store, url="https://vimeo.com/1", status="done", **overrides):
@@ -42,6 +44,31 @@ def test_search_returns_all_when_no_filters():
     assert len(store.search()) == 2
 
 
+def test_find_transcribable_returns_only_done_downloads_without_a_transcript():
+    store = HistoryStore()
+    none_entry = _record(store, url="https://vimeo.com/1")  # transcript_status "none"
+    errored_transcript = _record(store, url="https://vimeo.com/2")
+    store.update_transcript(errored_transcript["id"], status="error", error="boom")
+    done_transcript = _record(store, url="https://vimeo.com/3")
+    store.update_transcript(done_transcript["id"], status="done", transcript="hi")
+    running_transcript = _record(store, url="https://vimeo.com/4")
+    store.update_transcript(running_transcript["id"], status="running")
+    _record(store, url="https://vimeo.com/5", status="error", output_path=None)  # failed download
+
+    eligible_ids = {row["id"] for row in store.find_transcribable()}
+
+    # 'none' and 'error' transcript states on finished downloads are retryable;
+    # 'done'/'running' transcripts and failed downloads are excluded.
+    assert eligible_ids == {none_entry["id"], errored_transcript["id"]}
+
+
+def test_find_transcribable_respects_the_limit():
+    store = HistoryStore()
+    for i in range(5):
+        _record(store, url=f"https://vimeo.com/{i}")
+    assert len(store.find_transcribable(limit=3)) == 3
+
+
 def test_search_filters_by_status():
     store = HistoryStore()
     _record(store, status="done")
@@ -66,6 +93,47 @@ def test_search_respects_limit_and_offset():
         _record(store, url=f"https://vimeo.com/{i}")
     page = store.search(limit=2, offset=1)
     assert len(page) == 2
+
+
+def test_search_matches_transcript_text():
+    store = HistoryStore()
+    a = _record(store, url="https://vimeo.com/1", title="Video A")
+    store.update_transcript(a["id"], status="done", transcript="[00:00:00] photosynthesis explained")
+    _record(store, url="https://vimeo.com/2", title="Video B")
+
+    results = store.search(query="photosynthesis")
+
+    assert len(results) == 1
+    assert results[0]["id"] == a["id"]
+
+
+def test_search_matches_summary_text():
+    store = HistoryStore()
+    a = _record(store, url="https://vimeo.com/1", title="Video A")
+    store.update_summary(
+        a["id"], status="done",
+        summary='{"tldr": "all about mitochondria", "key_points": [], "chapters": []}',
+    )
+    _record(store, url="https://vimeo.com/2", title="Video B")
+
+    results = store.search(query="mitochondria")
+
+    assert len(results) == 1
+    assert results[0]["id"] == a["id"]
+
+
+def test_clear_matches_transcript_text():
+    store = HistoryStore()
+    a = _record(store, url="https://vimeo.com/1")
+    store.update_transcript(a["id"], status="done", transcript="[00:00:00] a special keyword here")
+    _record(store, url="https://vimeo.com/2")
+
+    removed = store.clear(query="special keyword")
+
+    assert removed == 1
+    remaining = store.search()
+    assert len(remaining) == 1
+    assert remaining[0]["url"] == "https://vimeo.com/2"
 
 
 def test_was_previously_downloaded_only_matches_done_status():
@@ -283,3 +351,46 @@ def test_history_persists_across_store_instances_pointing_at_same_file(tmp_path)
     store2 = HistoryStore(db_path)
     assert len(store2.search()) == 1
     assert store2.search()[0]["url"] == "https://vimeo.com/999"
+
+
+# --------------------------------------------------------------------------
+# redact_pro_summary_fields
+# --------------------------------------------------------------------------
+
+def _entry_with_summary(**overrides):
+    summary = {"tldr": "A short summary.", "key_points": [{"seconds": 5, "text": "point"}], "chapters": [{"seconds": 0, "title": "Intro"}]}
+    summary.update(overrides.pop("summary_overrides", {}))
+    entry = {"id": 1, "status": "done", "summary": json.dumps(summary)}
+    entry.update(overrides)
+    return entry
+
+
+def test_redact_pro_summary_fields_strips_key_points_and_chapters_when_not_pro():
+    entry = _entry_with_summary()
+    redacted = redact_pro_summary_fields(entry, is_pro=False)
+    stored = json.loads(redacted["summary"])
+    assert stored["tldr"] == "A short summary."
+    assert stored["key_points"] == []
+    assert stored["chapters"] == []
+
+
+def test_redact_pro_summary_fields_leaves_pro_entries_untouched():
+    entry = _entry_with_summary()
+    redacted = redact_pro_summary_fields(entry, is_pro=True)
+    assert redacted is entry
+    stored = json.loads(redacted["summary"])
+    assert len(stored["key_points"]) == 1
+    assert len(stored["chapters"]) == 1
+
+
+def test_redact_pro_summary_fields_is_a_noop_when_no_summary_yet():
+    entry = {"id": 1, "status": "done", "summary": None}
+    redacted = redact_pro_summary_fields(entry, is_pro=False)
+    assert redacted is entry
+
+
+def test_redact_pro_summary_fields_does_not_mutate_the_original_entry():
+    entry = _entry_with_summary()
+    original_summary = entry["summary"]
+    redact_pro_summary_fields(entry, is_pro=False)
+    assert entry["summary"] == original_summary

@@ -1,4 +1,4 @@
-from ai_clients import AIClientError
+from ai_clients import AIClientError, PROVIDER_DISPLAY_NAMES
 from audio_extraction import AudioExtractionError
 
 # Status codes worth retrying automatically before giving up and surfacing
@@ -21,7 +21,7 @@ def humanize_transcription_error(exc: Exception) -> str:
         return str(exc)  # audio_extraction.py's own messages are already user-facing
 
     if isinstance(exc, AIClientError):
-        provider_name = "Gemini" if exc.provider == "gemini" else "Anthropic"
+        provider_name = PROVIDER_DISPLAY_NAMES.get(exc.provider, exc.provider)
         # Most providers use 401/403 for a bad key -- Gemini instead reports
         # it as a plain 400 INVALID_ARGUMENT ("API key not valid"), so that
         # case needs matching on the response text (already embedded in the

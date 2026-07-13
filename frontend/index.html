@@ -20,60 +20,114 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <nav class="tabs">
-    <div class="tabs__group">
-      <span class="tab-indicator" aria-hidden="true"></span>
-      <button class="tab-btn active" data-view="view-queue" type="button">
-        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 4v10"></path>
-          <path d="M8 10l4 4 4-4"></path>
-          <path d="M5 18h14"></path>
-        </svg>
-        <span>Queue</span>
-      </button>
-      <button class="tab-btn" data-view="view-history" type="button">
-        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="8"></circle>
-          <path d="M12 8v4l3 2"></path>
-        </svg>
-        <span>History</span>
-      </button>
-      <button class="tab-btn" data-view="view-settings" type="button">
-        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
-        </svg>
-        <span>Settings</span>
-      </button>
-      <button class="tab-btn" data-view="view-extension" type="button">
-        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="5" y="7" width="14" height="12" rx="2"></rect>
-          <path d="M10 7V5a2 2 0 0 1 4 0v2"></path>
-        </svg>
-        <span>Extension</span>
-      </button>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar__brand">
+        <img src="../assets/icon.png" alt="" class="sidebar__logo" />
+        <span class="sidebar__wordmark">CLIP<span class="sidebar__wordmark-accent">.PULL</span></span>
+      </div>
+
+      <nav class="sidebar__nav" aria-label="Primary">
+        <span class="nav-indicator" aria-hidden="true"></span>
+        <button class="nav-btn active" data-view="view-queue" type="button" title="Queue">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 4v10"></path>
+            <path d="M8 10l4 4 4-4"></path>
+            <path d="M5 18h14"></path>
+          </svg>
+          <span class="nav-label">Queue</span>
+        </button>
+        <button class="nav-btn" data-view="view-history" type="button" title="History">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="8"></circle>
+            <path d="M12 8v4l3 2"></path>
+          </svg>
+          <span class="nav-label">History</span>
+        </button>
+        <button class="nav-btn" data-view="view-settings" type="button" title="Settings">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+          </svg>
+          <span class="nav-label">Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar__footer">
+        <div class="sidebar__footer-row">
+          <button
+            id="extension-popup-trigger"
+            class="sidebar__extension-btn"
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="extension-popup"
+            aria-label="Download Extension"
+            title="Download Extension"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3v12"></path>
+              <path d="M7 10l5 5 5-5"></path>
+              <path d="M5 21h14"></path>
+            </svg>
+            <span class="nav-btn__badge" id="nav-extension-badge" hidden aria-hidden="true"></span>
+          </button>
+          <button id="sidebar-collapse-btn" class="sidebar__collapse-btn" type="button" aria-label="Collapse sidebar" aria-pressed="false" title="Collapse sidebar">
+            <svg class="collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="extension-popup" class="extension-popup" role="dialog" aria-modal="false" aria-labelledby="extension-popup-title" tabindex="-1" hidden>
+      <div class="extension-hero">
+        <img src="../assets/extension-icon.png" alt="" class="extension-hero__icon" />
+        <div>
+          <h3 id="extension-popup-title" class="extension-hero__title">Skool Video Downloader</h3>
+          <p class="extension-hero__pitch">
+            A Chrome extension that detects the video on a Skool lesson page and sends it
+            straight into Clip.Pull's Queue tab — no copy-pasting links.
+          </p>
+        </div>
+        <button class="extension-popup__close" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <div id="extension-status" class="extension-status"></div>
+
+      <button id="extension-download-btn" class="btn btn--primary" type="button">Download Extension</button>
+
+      <div class="extension-steps">
+        <span class="field-label">Install in Chrome</span>
+        <ol class="extension-steps__list">
+          <li>Unzip the downloaded file</li>
+          <li>Open <a href="#" id="chrome-extensions-code" class="external-link" title="Click to open in your browser">chrome://extensions</a></li>
+          <li>Enable <strong>Developer Mode</strong> (top right)</li>
+          <li>Click <strong>Load unpacked</strong></li>
+          <li>Select the unzipped folder</li>
+        </ol>
+        <p class="extension-steps__note">
+          Once it's installed, open any course lesson with a video and click the CLIP.PULL
+          button the extension adds to your toolbar — the video drops straight into your Queue,
+          ready to download.
+        </p>
+      </div>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light and dark mode">
-      <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="4"></circle>
-        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
-      </svg>
-      <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-      </svg>
-    </button>
-  </nav>
 
-  <div id="connection-banner" class="connection-banner" hidden role="status">
-    Lost connection to the app's backend — reconnecting…
-  </div>
+    <div class="shell__main">
+      <div id="connection-banner" class="connection-banner" hidden role="status">
+        Connecting to CLIP.PULL's backend…
+      </div>
 
-  <div id="view-queue" class="view">
-    <div class="app app--wide">
-      <header class="app__header">
-        <h1 class="app__title">CLIP<span class="app__title-accent">.PULL</span></h1>
-        <p class="app__subtitle">Paste links. Pick a folder. Walk away.</p>
-      </header>
+      <div id="view-queue" class="view">
+        <div class="app app--wide">
+          <header class="app__header">
+            <h1 class="app__title">Queue</h1>
+            <p class="app__subtitle">Paste links. Pick a folder. Walk away.</p>
+          </header>
 
       <div class="bento">
         <section class="panel bento__input">
@@ -108,7 +162,16 @@
 
           <div class="field-row field-grid">
             <div class="field-group">
-              <label class="field-label" for="referer">Referer domain (optional)</label>
+              <div class="field-label-row">
+                <label class="field-label" for="referer">Referer domain (optional)</label>
+                <span
+                  class="field-help"
+                  role="img"
+                  tabindex="0"
+                  aria-label="Referer domain: Some course sites block direct downloads unless the request looks like it came from their own page — paste that page's URL here if a download fails."
+                  title="Some course sites block direct downloads unless the request looks like it came from their own page — paste that page's URL here if a download fails."
+                >?</span>
+              </div>
               <input
                 id="referer"
                 class="text-input"
@@ -118,7 +181,16 @@
             </div>
 
             <div class="field-group">
-              <label class="field-label" for="course-folder">Course/batch folder name (optional)</label>
+              <div class="field-label-row">
+                <label class="field-label" for="course-folder">Course/batch folder name (optional)</label>
+                <span
+                  class="field-help"
+                  role="img"
+                  tabindex="0"
+                  aria-label="Course folder name: Downloads go into a subfolder with this name, so a whole course stays organized together."
+                  title="Downloads go into a subfolder with this name, so a whole course stays organized together."
+                >?</span>
+              </div>
               <input
                 id="course-folder"
                 class="text-input"
@@ -171,7 +243,7 @@
             <circle cx="11" cy="11" r="7"></circle>
             <path d="m21 21-4.3-4.3"></path>
           </svg>
-          <input id="history-search" type="text" placeholder="Search download history" />
+          <input id="history-search" type="text" placeholder="Search titles, URLs, or transcripts…" />
         </div>
         <div class="select-wrapper history-status-filter">
           <select id="history-status-filter" class="text-input">
@@ -184,13 +256,58 @@
           </svg>
         </div>
       </div>
-      <ul id="history-list" class="queue-list"></ul>
+      <div class="history-batch">
+        <button id="history-batch-btn" class="btn btn--ghost btn--pill history-batch__btn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+          <span class="history-batch__label">Transcribe all</span>
+        </button>
+        <label class="history-batch__option">
+          <input id="history-batch-summarize" type="checkbox" /> Also summarize
+        </label>
+        <span id="history-batch-lock" class="history-batch__lock" hidden>Pro</span>
+      </div>
+      <ul id="history-list" class="queue-list history-list"></ul>
     </div>
   </div>
 
   <div id="view-settings" class="view" hidden>
     <div class="app">
-      <h2 class="queue-title">Settings</h2>
+      <div class="queue-header">
+        <h2 class="queue-title">Settings</h2>
+      </div>
+
+      <div class="settings-help">
+        <span class="settings-help__text">New here, or want a refresher on how CLIP.PULL works?</span>
+        <button id="show-onboarding-btn" class="btn btn--ghost btn--pill" type="button">Show welcome tour</button>
+      </div>
+
+      <section class="panel">
+        <h3 class="settings-section__title">
+          <img src="../assets/icon.png" alt="" class="settings-section__icon settings-section__icon--logo" />
+          CLIP.PULL Pro
+        </h3>
+        <p class="settings-section__subtitle">
+          Unlock Lesson Notes, batch transcription, and more with a one-time purchase.
+          Already bought it? Enter your license key below.
+        </p>
+
+        <div id="license-status" class="license-status" data-status="none">
+          <span class="license-status__dot" aria-hidden="true"></span>
+          <p id="license-status-text" class="license-status__text">Checking…</p>
+        </div>
+
+        <label class="field-label" for="setting-license-key">License key</label>
+        <div class="license-key-row">
+          <input id="setting-license-key" class="text-input" type="text" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" />
+          <button id="license-activate-btn" class="btn btn--ghost" type="button">Activate</button>
+        </div>
+
+        <div class="license-actions">
+          <button id="license-upgrade-btn" class="btn btn--primary btn--pill" type="button">Upgrade to Pro</button>
+          <button id="license-deactivate-btn" class="btn btn--ghost btn--pill" type="button" hidden>Deactivate</button>
+        </div>
+      </section>
+
       <div class="panel">
         <label class="field-label" for="setting-max-concurrent">Max concurrent downloads</label>
         <input id="setting-max-concurrent" class="text-input" type="number" min="1" max="10" />
@@ -207,63 +324,267 @@
           <input id="setting-skip-duplicates" type="checkbox" /> Skip already-downloaded links automatically
         </label>
 
+        <label class="field-label">
+          <input id="setting-auto-transcribe" type="checkbox" /> Automatically transcribe new downloads
+          <span class="pro-lock-note" hidden>Pro</span>
+        </label>
+        <label class="field-label field-label--nested">
+          <input id="setting-auto-summarize" type="checkbox" /> …and summarize them too
+        </label>
+
         <label class="field-label" for="setting-default-folder">Default output folder</label>
         <div class="folder-picker">
           <input id="setting-default-folder" class="folder-input" type="text" readonly />
           <button id="setting-browse-btn" class="btn btn--ghost" type="button">Browse…</button>
         </div>
 
-        <label class="field-label" for="setting-gemini-api-key">Gemini API key</label>
-        <input id="setting-gemini-api-key" class="text-input" type="password" autocomplete="off" placeholder="AIza…" />
-        <p class="field-hint">
-          Powers transcription (Gemini). Get a key at
-          <a href="#" data-external-link="https://aistudio.google.com/app/apikey">aistudio.google.com/app/apikey</a>.
-        </p>
+        <div class="settings-section">
+          <h3 class="settings-section__title">
+            <svg class="settings-section__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"></path></svg>
+            AI Providers
+          </h3>
+          <p class="settings-section__subtitle">Choose which service powers each AI feature. Switch anytime — your keys are saved below.</p>
 
-        <label class="field-label" for="setting-anthropic-api-key">Anthropic API key</label>
-        <input id="setting-anthropic-api-key" class="text-input" type="password" autocomplete="off" placeholder="sk-ant-…" />
-        <p class="field-hint">
-          Powers summarization (Claude). Get a key at
-          <a href="#" data-external-link="https://console.anthropic.com/settings/keys">console.anthropic.com/settings/keys</a>.
-        </p>
+          <div class="provider-picker">
+            <div class="provider-picker__header">
+              <span class="provider-picker__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+              </span>
+              <div>
+                <div class="provider-picker__title">Transcription</div>
+                <div class="provider-picker__desc">Converts a video's audio into text</div>
+              </div>
+            </div>
+            <div class="provider-pills" role="radiogroup" aria-label="Transcription provider" data-provider-group="transcription_provider">
+              <button class="provider-pill" type="button" data-provider="gemini" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="gemini"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"></path></svg></span>Gemini
+              </button>
+              <button class="provider-pill" type="button" data-provider="openai" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="openai"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"></path></svg></span>OpenAI Whisper
+              </button>
+              <button class="provider-pill" type="button" data-provider="groq" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="groq"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.2 2 4.5 13.6h5.1L9 22l9.5-12.4h-5.3z"></path></svg></span>Groq
+              </button>
+            </div>
+          </div>
 
-        <button id="settings-save-btn" class="btn btn--primary" type="button">Save Settings</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="view-extension" class="view" hidden>
-    <div class="app">
-      <h2 class="queue-title">Extension</h2>
-      <div class="panel">
-        <div class="extension-hero">
-          <img src="../assets/extension-icon.png" alt="" class="extension-hero__icon" />
-          <div>
-            <h3 class="extension-hero__title">Skool Video Downloader</h3>
-            <p class="extension-hero__pitch">
-              A Chrome extension that detects the video on a Skool lesson page and sends it
-              straight into Clip.Pull's Queue tab — no copy-pasting links.
-            </p>
+          <div class="provider-picker">
+            <div class="provider-picker__header">
+              <span class="provider-picker__icon">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c.3 3.6 1.1 6 2.5 7.5S18.4 11.7 22 12c-3.6.3-6 1.1-7.5 2.5S12.3 18.4 12 22c-.3-3.6-1.1-6-2.5-7.5S6.6 12.3 2 12c3.6-.3 6-1.1 7.5-2.5S11.7 6.6 12 2z"></path></svg>
+              </span>
+              <div>
+                <div class="provider-picker__title">Summarization</div>
+                <div class="provider-picker__desc">Turns a transcript into key points</div>
+              </div>
+            </div>
+            <div class="provider-pills" role="radiogroup" aria-label="Summarization provider" data-provider-group="summarization_provider">
+              <button class="provider-pill" type="button" data-provider="anthropic" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="anthropic"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"></path></svg></span>Anthropic
+              </button>
+              <button class="provider-pill" type="button" data-provider="openai" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="openai"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"></path></svg></span>OpenAI
+              </button>
+              <button class="provider-pill" type="button" data-provider="gemini" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="gemini"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"></path></svg></span>Gemini
+              </button>
+              <button class="provider-pill" type="button" data-provider="openrouter" aria-pressed="false">
+                <span class="provider-pill__badge" data-badge="openrouter"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z"></path></svg></span>OpenRouter
+              </button>
+            </div>
           </div>
         </div>
 
-        <div id="extension-status" class="extension-status"></div>
+        <div class="settings-section">
+          <h3 class="settings-section__title">
+            <svg class="settings-section__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6"></path><path d="m15.5 7.5 3 3L22 7l-3-3"></path></svg>
+            API Keys
+          </h3>
+          <p class="settings-section__subtitle">Stored locally on this device and sent directly to each provider — never through a third party. Tap a provider to expand it and paste in a key.</p>
 
-        <button id="extension-download-btn" class="btn btn--primary" type="button">Download Extension</button>
+          <div class="api-key-row" data-key-provider="gemini">
+            <div class="api-key-row__header" role="button" tabindex="0" aria-expanded="false">
+              <span class="api-key-row__badge" data-badge="gemini"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"></path></svg></span>
+              <div class="api-key-row__top">
+                <span class="api-key-row__name">Gemini</span>
+                <span class="api-key-row__used-by" data-used-by="gemini" hidden></span>
+              </div>
+              <svg class="api-key-row__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div class="api-key-row__body" hidden>
+              <div class="field-with-toggle">
+                <input id="setting-gemini-api-key" class="text-input" type="password" autocomplete="off" placeholder="AIza…" />
+                <button class="field-toggle-btn" type="button" data-visible="false" data-toggle-visibility="setting-gemini-api-key" aria-label="Show Gemini API key" aria-pressed="false">
+                  <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.3 21.3 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.3 21.3 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
+                </button>
+              </div>
+              <div class="api-key-row__actions">
+                <button class="btn btn--ghost btn--pill api-key-test-btn" type="button" data-test-provider="gemini">Test key</button>
+                <span class="api-key-test-result" data-test-result="gemini" role="status" hidden></span>
+              </div>
+              <p class="field-hint">Get a key at <a href="#" data-external-link="https://aistudio.google.com/app/apikey">aistudio.google.com/app/apikey</a> · Free tier available</p>
+              <details class="api-key-why">
+                <summary>Why do I need this?</summary>
+                <p>Gemini can power both transcription and summarization. Adding a key is optional — it only matters if you use CLIP.PULL's AI features. You pay Google directly for what you use, billed to your own Gemini account; CLIP.PULL never charges you, and your key stays on this device.</p>
+              </details>
+            </div>
+          </div>
 
-        <div class="extension-steps">
-          <span class="field-label">Install in Chrome</span>
-          <ol class="extension-steps__list">
-            <li>Unzip the downloaded file</li>
-            <li>Open <code id="chrome-extensions-code" class="copyable-code" title="Click to open in your browser">chrome://extensions</code></li>
-            <li>Enable <strong>Developer Mode</strong> (top right)</li>
-            <li>Click <strong>Load unpacked</strong></li>
-            <li>Select the unzipped folder</li>
-          </ol>
+          <div class="api-key-row" data-key-provider="anthropic">
+            <div class="api-key-row__header" role="button" tabindex="0" aria-expanded="false">
+              <span class="api-key-row__badge" data-badge="anthropic"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"></path></svg></span>
+              <div class="api-key-row__top">
+                <span class="api-key-row__name">Anthropic</span>
+                <span class="api-key-row__used-by" data-used-by="anthropic" hidden></span>
+              </div>
+              <svg class="api-key-row__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div class="api-key-row__body" hidden>
+              <div class="field-with-toggle">
+                <input id="setting-anthropic-api-key" class="text-input" type="password" autocomplete="off" placeholder="sk-ant-…" />
+                <button class="field-toggle-btn" type="button" data-visible="false" data-toggle-visibility="setting-anthropic-api-key" aria-label="Show Anthropic API key" aria-pressed="false">
+                  <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.3 21.3 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.3 21.3 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
+                </button>
+              </div>
+              <div class="api-key-row__actions">
+                <button class="btn btn--ghost btn--pill api-key-test-btn" type="button" data-test-provider="anthropic">Test key</button>
+                <span class="api-key-test-result" data-test-result="anthropic" role="status" hidden></span>
+              </div>
+              <p class="field-hint">Get a key at <a href="#" data-external-link="https://console.anthropic.com/settings/keys">console.anthropic.com/settings/keys</a></p>
+              <details class="api-key-why">
+                <summary>Why do I need this?</summary>
+                <p>Anthropic (Claude) powers summarization and Lesson Notes. Adding a key is optional — it only matters if you use CLIP.PULL's AI features. You pay Anthropic directly for what you use, billed to your own account; CLIP.PULL never charges you, and your key stays on this device.</p>
+              </details>
+            </div>
+          </div>
+
+          <div class="api-key-row" data-key-provider="openai">
+            <div class="api-key-row__header" role="button" tabindex="0" aria-expanded="false">
+              <span class="api-key-row__badge" data-badge="openai"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"></path></svg></span>
+              <div class="api-key-row__top">
+                <span class="api-key-row__name">OpenAI</span>
+                <span class="api-key-row__used-by" data-used-by="openai" hidden></span>
+              </div>
+              <svg class="api-key-row__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div class="api-key-row__body" hidden>
+              <div class="field-with-toggle">
+                <input id="setting-openai-api-key" class="text-input" type="password" autocomplete="off" placeholder="sk-…" />
+                <button class="field-toggle-btn" type="button" data-visible="false" data-toggle-visibility="setting-openai-api-key" aria-label="Show OpenAI API key" aria-pressed="false">
+                  <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.3 21.3 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.3 21.3 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
+                </button>
+              </div>
+              <div class="api-key-row__actions">
+                <button class="btn btn--ghost btn--pill api-key-test-btn" type="button" data-test-provider="openai">Test key</button>
+                <span class="api-key-test-result" data-test-result="openai" role="status" hidden></span>
+              </div>
+              <p class="field-hint">Get a key at <a href="#" data-external-link="https://platform.openai.com/api-keys">platform.openai.com/api-keys</a></p>
+              <details class="api-key-why">
+                <summary>Why do I need this?</summary>
+                <p>OpenAI powers transcription (Whisper) and summarization. Adding a key is optional — it only matters if you use CLIP.PULL's AI features. You pay OpenAI directly for what you use, billed to your own account; CLIP.PULL never charges you, and your key stays on this device.</p>
+              </details>
+            </div>
+          </div>
+
+          <div class="api-key-row" data-key-provider="groq">
+            <div class="api-key-row__header" role="button" tabindex="0" aria-expanded="false">
+              <span class="api-key-row__badge" data-badge="groq"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.2 2 4.5 13.6h5.1L9 22l9.5-12.4h-5.3z"></path></svg></span>
+              <div class="api-key-row__top">
+                <span class="api-key-row__name">Groq</span>
+                <span class="api-key-row__used-by" data-used-by="groq" hidden></span>
+              </div>
+              <svg class="api-key-row__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div class="api-key-row__body" hidden>
+              <div class="field-with-toggle">
+                <input id="setting-groq-api-key" class="text-input" type="password" autocomplete="off" placeholder="gsk_…" />
+                <button class="field-toggle-btn" type="button" data-visible="false" data-toggle-visibility="setting-groq-api-key" aria-label="Show Groq API key" aria-pressed="false">
+                  <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.3 21.3 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.3 21.3 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
+                </button>
+              </div>
+              <div class="api-key-row__actions">
+                <button class="btn btn--ghost btn--pill api-key-test-btn" type="button" data-test-provider="groq">Test key</button>
+                <span class="api-key-test-result" data-test-result="groq" role="status" hidden></span>
+              </div>
+              <p class="field-hint">Get a key at <a href="#" data-external-link="https://console.groq.com/keys">console.groq.com/keys</a> · Free tier available</p>
+              <details class="api-key-why">
+                <summary>Why do I need this?</summary>
+                <p>Groq powers fast, low-cost transcription. Adding a key is optional — it only matters if you use CLIP.PULL's AI features. You pay Groq directly for what you use, billed to your own account; CLIP.PULL never charges you, and your key stays on this device.</p>
+              </details>
+            </div>
+          </div>
+
+          <div class="api-key-row" data-key-provider="openrouter">
+            <div class="api-key-row__header" role="button" tabindex="0" aria-expanded="false">
+              <span class="api-key-row__badge" data-badge="openrouter"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z"></path></svg></span>
+              <div class="api-key-row__top">
+                <span class="api-key-row__name">OpenRouter</span>
+                <span class="api-key-row__used-by" data-used-by="openrouter" hidden></span>
+              </div>
+              <svg class="api-key-row__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+            <div class="api-key-row__body" hidden>
+              <div class="field-with-toggle">
+                <input id="setting-openrouter-api-key" class="text-input" type="password" autocomplete="off" placeholder="sk-or-…" />
+                <button class="field-toggle-btn" type="button" data-visible="false" data-toggle-visibility="setting-openrouter-api-key" aria-label="Show OpenRouter API key" aria-pressed="false">
+                  <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.3 21.3 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a21.3 21.3 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
+                </button>
+              </div>
+              <div class="api-key-row__actions">
+                <button class="btn btn--ghost btn--pill api-key-test-btn" type="button" data-test-provider="openrouter">Test key</button>
+                <span class="api-key-test-result" data-test-result="openrouter" role="status" hidden></span>
+              </div>
+              <p class="field-hint">Get a key at <a href="#" data-external-link="https://openrouter.ai/settings/keys">openrouter.ai/settings/keys</a></p>
+              <details class="api-key-why">
+                <summary>Why do I need this?</summary>
+                <p>OpenRouter powers summarization through a range of models. Adding a key is optional — it only matters if you use CLIP.PULL's AI features. You pay OpenRouter directly for what you use, billed to your own account; CLIP.PULL never charges you, and your key stays on this device.</p>
+              </details>
+            </div>
+          </div>
         </div>
+
+        <button id="settings-save-btn" class="btn btn--primary" type="button">Save Settings</button>
       </div>
+
+      <section class="panel">
+        <div class="usage-header">
+          <h3 class="settings-section__title">
+            <svg class="settings-section__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+            AI Usage
+          </h3>
+          <button id="usage-refresh-btn" class="icon-btn" type="button" aria-label="Refresh usage" title="Refresh usage">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-3-6.7"></path>
+              <path d="M21 3v6h-6"></path>
+            </svg>
+          </button>
+        </div>
+        <p class="settings-section__subtitle">
+          Token usage and estimated cost across your configured AI providers.
+          These are rough estimates — check your provider's own dashboard for exact billing.
+        </p>
+        <div id="usage-summary" class="usage-list"></div>
+      </section>
     </div>
   </div>
+
+    </div>
+  </div>
+
+  <button id="theme-toggle" class="theme-toggle theme-toggle--floating" type="button" aria-label="Toggle light and dark mode">
+    <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+    </svg>
+    <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    </svg>
+  </button>
 
   <div id="duplicate-confirm-overlay" class="modal-overlay" hidden>
     <div class="modal panel" role="alertdialog" aria-modal="true" aria-labelledby="duplicate-confirm-title" aria-describedby="duplicate-confirm-message">
@@ -283,10 +604,11 @@
   <script type="module" src="ripple.js"></script>
   <script type="module" src="toast.js"></script>
   <script type="module" src="ws-client.js"></script>
-  <script type="module" src="tabs.js"></script>
+  <script type="module" src="sidebar.js"></script>
   <script type="module" src="settings-view.js"></script>
   <script type="module" src="history-view.js"></script>
   <script type="module" src="extension-view.js"></script>
+  <script type="module" src="onboarding.js"></script>
   <script type="module" src="renderer.js"></script>
 </body>
 </html>

@@ -53,6 +53,42 @@ MIGRATIONS = [
         ALTER TABLE history ADD COLUMN summary_error TEXT;
         ALTER TABLE history ADD COLUMN summarized_at TEXT;
     """),
+    (8, """
+        ALTER TABLE settings ADD COLUMN openai_api_key TEXT;
+        ALTER TABLE settings ADD COLUMN groq_api_key TEXT;
+        ALTER TABLE settings ADD COLUMN openrouter_api_key TEXT;
+        ALTER TABLE settings ADD COLUMN transcription_provider TEXT NOT NULL DEFAULT 'gemini';
+        ALTER TABLE settings ADD COLUMN summarization_provider TEXT NOT NULL DEFAULT 'anthropic';
+    """),
+    (9, """
+        CREATE TABLE IF NOT EXISTS license (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          license_key TEXT,
+          status TEXT NOT NULL DEFAULT 'none',
+          purchase_email TEXT,
+          activated_at TEXT,
+          last_validated_at TEXT
+        );
+    """),
+    (10, """
+        CREATE TABLE IF NOT EXISTS ai_usage (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          provider TEXT NOT NULL,
+          model TEXT,
+          operation TEXT NOT NULL,
+          history_id INTEGER,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          total_tokens INTEGER,
+          audio_seconds REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_usage_provider ON ai_usage(provider);
+    """),
+    (11, """
+        ALTER TABLE settings ADD COLUMN auto_transcribe_on_download INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE settings ADD COLUMN auto_summarize_after_transcribe INTEGER NOT NULL DEFAULT 0;
+    """),
 ]
 
 
@@ -63,6 +99,10 @@ def get_connection(db_path: Union[str, Path]) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     if str(db_path) != ":memory:":
         conn.execute("PRAGMA journal_mode=WAL")
+        # Wait up to 5s for a competing writer to release its lock before
+        # giving up with SQLITE_BUSY, rather than raising OperationalError on
+        # the first contended read/write under concurrent access.
+        conn.execute("PRAGMA busy_timeout=5000")
     run_migrations(conn)
     return conn
 

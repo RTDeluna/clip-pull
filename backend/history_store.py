@@ -1,8 +1,28 @@
+import json
 import threading
 from pathlib import Path
 from typing import Optional, Union
 
 from db import get_connection
+
+
+def redact_pro_summary_fields(entry: dict, is_pro: bool) -> dict:
+    """Structured Lesson Notes (key_points/chapters) are a CLIP.PULL Pro
+    feature -- gating them only in the frontend (hiding the section) would
+    still ship the full parsed content in every /history response and WS
+    broadcast, trivially visible to a free user via DevTools' Network tab
+    regardless of what the UI shows. This strips them down to just the
+    tldr for a non-Pro caller, so the restriction is real, not cosmetic --
+    matching how export/chat/batch are already hard-gated server-side.
+    A no-op for Pro callers or entries with no summary yet."""
+    if is_pro or not entry.get("summary"):
+        return entry
+    try:
+        structured = json.loads(entry["summary"])
+    except (ValueError, TypeError):
+        return entry
+    redacted = {**structured, "key_points": [], "chapters": []}
+    return {**entry, "summary": json.dumps(redacted)}
 
 
 class HistoryStore:
@@ -182,9 +202,15 @@ class HistoryStore:
         conditions = []
         params: list = []
         if query:
-            conditions.append("(url LIKE ? OR title LIKE ? OR output_path LIKE ?)")
+            # Also searches transcript/summary text so the query box doubles as
+            # content search. Plain LIKE is fine at local single-user SQLite
+            # scale -- no FTS index needed for a personal download history.
+            conditions.append(
+                "(url LIKE ? OR title LIKE ? OR output_path LIKE ? "
+                "OR transcript LIKE ? OR summary LIKE ?)"
+            )
             like = f"%{query}%"
-            params.extend([like, like, like])
+            params.extend([like, like, like, like, like])
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -194,6 +220,24 @@ class HistoryStore:
             rows = self._conn.execute(
                 f"SELECT * FROM history {where} ORDER BY id DESC LIMIT ? OFFSET ?",
                 params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def find_transcribable(self, limit: int = 50) -> list[dict]:
+        """Finished downloads that don't yet have a usable transcript -- the
+        default target set for the batch-process action when no explicit ids
+        are given. 'none'/'error' are the retryable transcript states; 'running'
+        and 'done' are deliberately excluded (already in flight, or already
+        transcribed). Newest first, capped so one batch request can't flood the
+        transcription queue with an unbounded number of jobs."""
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM history
+                WHERE status = 'done' AND transcript_status IN ('none', 'error')
+                ORDER BY id DESC LIMIT ?
+                """,
+                (limit,),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -207,9 +251,15 @@ class HistoryStore:
         conditions = []
         params: list = []
         if query:
-            conditions.append("(url LIKE ? OR title LIKE ? OR output_path LIKE ?)")
+            # Mirror search()'s content-aware matching so "clear matching" clears
+            # exactly the rows the same query would have shown. Plain LIKE is
+            # fine at local single-user SQLite scale.
+            conditions.append(
+                "(url LIKE ? OR title LIKE ? OR output_path LIKE ? "
+                "OR transcript LIKE ? OR summary LIKE ?)"
+            )
             like = f"%{query}%"
-            params.extend([like, like, like])
+            params.extend([like, like, like, like, like])
         if status:
             conditions.append("status = ?")
             params.append(status)

@@ -1,9 +1,10 @@
 import sqlite3
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ai_clients import SUMMARIZATION_CLIENTS, TRANSCRIPTION_CLIENTS
 from downloader import check_aria2c_available
 from settings_store import SettingsStore
 
@@ -18,6 +19,13 @@ class SettingsUpdateRequest(BaseModel):
     default_output_folder: Optional[str] = None
     gemini_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    transcription_provider: Optional[Literal[tuple(TRANSCRIPTION_CLIENTS)]] = None
+    summarization_provider: Optional[Literal[tuple(SUMMARIZATION_CLIENTS)]] = None
+    auto_transcribe_on_download: Optional[bool] = None
+    auto_summarize_after_transcribe: Optional[bool] = None
 
 
 def build_settings_router(settings_store: SettingsStore) -> APIRouter:

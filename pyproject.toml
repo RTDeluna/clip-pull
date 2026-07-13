@@ -1,0 +1,22 @@
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+# The backend modules import each other by bare name (they run with backend/
+# as the working dir), so point ruff at it to resolve first-party imports --
+# otherwise isort mis-groups them as third-party and flags the intentional
+# stdlib / third-party / local import blocks as unsorted.
+src = ["backend"]
+extend-exclude = [
+    "backend/build",
+    "backend/dist",
+    "node_modules",
+    "website",
+    ".venv",
+]
+
+[tool.ruff.lint]
+# Pragmatic default for an existing codebase: pyflakes (F), pycodestyle
+# errors (E), and import sorting (I). Deliberately not enabling the stricter
+# opinionated rule groups, to avoid flooding this reliability pass with
+# unrelated style warnings.
+select = ["E", "F", "I"]

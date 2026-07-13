@@ -209,7 +209,10 @@ function renderRow(entry, { announceCompletion = true } = {}) {
   row.classList.toggle("queue-row--downloading", entry.status === "downloading");
   row.style.setProperty("--shimmer-duration", `${shimmerDurationForSpeed(entry.speed_bytes)}s`);
 
-  row.querySelector(".queue-row__title").textContent = entry.title || entry.url;
+  const titleText = entry.title || entry.url;
+  const titleEl = row.querySelector(".queue-row__title");
+  titleEl.textContent = titleText;
+  titleEl.title = titleText;
   row.querySelector(".queue-row__duplicate-badge").hidden = !entry.previously_downloaded;
   const statusEl = row.querySelector(".queue-row__status");
   statusEl.textContent = statusLabel(entry);
@@ -481,12 +484,21 @@ function confirmDuplicates(duplicateUrls) {
   });
 }
 
+// Returns the parsed success body, or null after surfacing a backend error.
+// Without the response.ok check, a 4xx/5xx {"detail": "..."} body would be
+// read as a success shape and later throw a TypeError on body.entries, which
+// the caller's catch then mislabels as "Failed to reach the backend".
 async function postQueue(payload) {
   const response = await fetch(`${API_BASE}/queue`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    showToast(body?.detail || `The backend rejected the request (${response.status}).`, "error");
+    return null;
+  }
   return response.json();
 }
 
@@ -497,6 +509,11 @@ startBtn.addEventListener("click", async () => {
   }
   startBtn.disabled = true;
   invalidLinesEl.hidden = true;
+  // Immediate feedback while the POST is in flight — the refresh buttons
+  // elsewhere use an is-spinning class; a text button reads more clearly with
+  // a label swap. Restored in the finally block below.
+  const startBtnLabel = startBtn.textContent;
+  startBtn.textContent = "Starting…";
 
   const payload = {
     urls_text: urlsInput.value,
@@ -507,6 +524,8 @@ startBtn.addEventListener("click", async () => {
 
   try {
     let body = await postQueue(payload);
+    // postQueue already surfaced the error toast; just abort the success path.
+    if (!body) return;
 
     if (body.invalid_lines && body.invalid_lines.length > 0) {
       invalidLinesEl.hidden = false;
@@ -520,6 +539,7 @@ startBtn.addEventListener("click", async () => {
         return;
       }
       body = await postQueue({ ...payload, duplicate_action: decision });
+      if (!body) return;
     }
 
     if (body.entries.length) {
@@ -538,8 +558,13 @@ startBtn.addEventListener("click", async () => {
     showToast("Failed to reach the backend: " + error.message, "error");
   } finally {
     startBtn.disabled = false;
+    startBtn.textContent = startBtnLabel;
   }
 });
+
+// Distinguishes a genuine drop (show "reconnecting…") from a first-launch
+// attempt that hasn't connected yet (show "connecting…") in the banner below.
+let hasEverConnected = false;
 
 connectQueueSocket(
   (event) => {
@@ -569,9 +594,35 @@ connectQueueSocket(
     // hiccup) left the Queue view silently frozen with zero indication
     // anything was wrong — the reconnect itself already happens
     // automatically (see ws-client.js), this just makes it visible.
+    if (status === "connected") hasEverConnected = true;
     connectionBanner.hidden = status !== "disconnected";
+    // "reconnecting…" only makes sense once we've actually been connected;
+    // on a first-launch attempt that never succeeded yet, it's just connecting.
+    if (status === "disconnected") {
+      connectionBanner.textContent = hasEverConnected
+        ? "Lost connection to CLIP.PULL's backend — reconnecting…"
+        : "Connecting to CLIP.PULL's backend…";
+    }
   }
 );
+
+// Persistent inline fallback shown next to the "Save to" field when the
+// prefill gives up — a text line plus a button that re-triggers the prefill.
+function showPrefillLoadError() {
+  const container = outputFolderInput.closest(".field-group");
+  if (container.querySelector(".load-error")) return;
+  const el = document.createElement("div");
+  el.className = "load-error";
+  el.innerHTML = `
+    <span class="load-error__msg">Couldn't load your saved folder.</span>
+    <button class="btn btn--ghost load-error__retry" type="button">Retry</button>
+  `;
+  el.querySelector(".load-error__retry").addEventListener("click", () => {
+    el.remove();
+    prefillDefaultOutputFolder();
+  });
+  container.appendChild(el);
+}
 
 // The packaged backend is a PyInstaller onefile executable — it self-extracts
 // to a temp directory on every launch, which (especially on first run, with
@@ -590,9 +641,16 @@ async function prefillDefaultOutputFolder(retriesLeft = 10) {
   } catch {
     if (retriesLeft > 0) {
       setTimeout(() => prefillDefaultOutputFolder(retriesLeft - 1), 500);
+    } else if (!outputFolderInput.value) {
+      // Retries exhausted and the field is still empty — surface it instead of
+      // silently leaving no folder. (If the user already picked one via Browse
+      // meanwhile, the prefill is moot, so stay quiet.)
+      showToast(
+        "Couldn't load your saved output folder — check that CLIP.PULL's backend is running, then choose a folder or retry.",
+        "error"
+      );
+      showPrefillLoadError();
     }
-    // Retries exhausted — backend genuinely unreachable; Queue view still
-    // works, just without a prefilled folder, and the user can still Browse.
   }
 }
 
