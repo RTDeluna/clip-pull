@@ -10,7 +10,7 @@ build/
 backend/data/
 backend/vendor/
 *.spec
-assets/extension/*.zip
+assets/extension/*
 .superpowers/
 .claude/
 .pytest_cache/
