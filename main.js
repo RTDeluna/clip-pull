@@ -86,18 +86,47 @@ function getDbPath() {
   return path.join(app.getPath("userData"), "clip_pull.db");
 }
 
+// A packaged app has no visible console -- console.error/console.log below
+// are invisible to a real user, which is exactly why the "having trouble
+// starting" investigation kept hitting a wall: there was no way to tell
+// whether spawn() even ran, let alone why it failed. This persists the same
+// key milestones to a plain text file instead, readable after the fact from
+// Explorer without needing dev tools. Deliberately synchronous and best-
+// effort (wrapped in try/catch, never throws) -- logging must never be what
+// takes the app down, and call volume here is a handful of lines per
+// launch, not a hot path.
+function getLaunchLogPath() {
+  return path.join(app.getPath("userData"), "launch.log");
+}
+
+function logLaunch(message) {
+  try {
+    fs.appendFileSync(getLaunchLogPath(), `[${new Date().toISOString()}] ${message}\n`);
+  } catch {
+    // Best-effort -- e.g. userData not yet writable this early. Nothing to
+    // fall back to; this is diagnostic-only.
+  }
+}
+
 function spawnBackend() {
   isShuttingDown = false;
   const bundledFfmpeg = getBundledFfmpegPath();
   const ffmpegEnv = bundledFfmpeg ? { CLIP_PULL_FFMPEG_PATH: bundledFfmpeg } : {};
   if (app.isPackaged) {
     const dbPath = getDbPath();
-    backendProcess = spawn(getBackendExecutablePath(), [], {
+    const backendExe = getBackendExecutablePath();
+    // The single most useful line in this log: if the installer somehow
+    // didn't fully write (or something else -- AV, disk issue -- removed)
+    // the backend's files, this is false and everything downstream is
+    // explained in one line instead of being a mystery.
+    logLaunch(`spawnBackend: exe=${backendExe} exists=${fs.existsSync(backendExe)}`);
+    backendProcess = spawn(backendExe, [], {
       stdio: "inherit",
       env: { ...process.env, CLIP_PULL_DB_PATH: dbPath, CLIP_PULL_API_TOKEN: API_TOKEN, ...ffmpegEnv },
       windowsHide: true,
     });
   } else {
+    logLaunch("spawnBackend: dev mode (python main.py)");
     backendProcess = spawn("python", ["main.py"], {
       cwd: path.join(__dirname, "backend"),
       stdio: "inherit",
@@ -106,6 +135,10 @@ function spawnBackend() {
   }
   backendProcess.on("error", (err) => {
     console.error("Failed to start backend:", err);
+    logLaunch(`backendProcess error: ${err.code || ""} ${err.message}`);
+  });
+  backendProcess.on("spawn", () => {
+    logLaunch(`backendProcess spawned, pid=${backendProcess.pid}`);
   });
   // Without this, a mid-session backend crash (unhandled Python exception,
   // segfault, OOM) left the window open and looking alive while every
@@ -114,6 +147,7 @@ function spawnBackend() {
     backendProcess = null;
     if (isShuttingDown) return;
     console.error(`Backend exited unexpectedly (code=${code}, signal=${signal}).`);
+    logLaunch(`backendProcess exited unexpectedly: code=${code} signal=${signal}`);
     dialog.showErrorBox(
       "CLIP.PULL backend stopped",
       "The download engine stopped unexpectedly and can't continue this " +
@@ -152,6 +186,7 @@ function killBackend() {
 function waitForBackend(retriesLeft, onReady) {
   if (retriesLeft <= 0) {
     console.error("Backend did not become ready in time.");
+    logLaunch("waitForBackend: gave up, backend never responded to /health");
     dialog.showErrorBox(
       "CLIP.PULL is having trouble starting",
       "The download engine didn't respond in time. The app will still " +
@@ -164,12 +199,21 @@ function waitForBackend(retriesLeft, onReady) {
   http
     .get(BACKEND_HEALTH_URL, (res) => {
       if (res.statusCode === 200) {
+        logLaunch(`waitForBackend: /health responded 200, retriesLeft was ${retriesLeft}`);
         onReady();
       } else {
         setTimeout(() => waitForBackend(retriesLeft - 1, onReady), 300);
       }
     })
-    .on("error", () => {
+    .on("error", (err) => {
+      // Logged only once (the first tick) rather than on every one of up to
+      // 100 retries -- this is "backend not listening yet," which is the
+      // expected state for most of the wait, not something worth a line per
+      // 300ms tick. err.code is almost always ECONNREFUSED here (nothing on
+      // the port yet); still captured in case it's ever something else.
+      if (retriesLeft === NORMAL_RETRY_COUNT - 1 || retriesLeft === FIRST_RUN_RETRY_COUNT - 1) {
+        logLaunch(`waitForBackend: first health check failed (${err.code || err.message}), will keep retrying`);
+      }
       setTimeout(() => waitForBackend(retriesLeft - 1, onReady), 300);
     });
 }
@@ -599,6 +643,7 @@ ipcMain.handle("save-text-file", async (_, { content, defaultFilename, filters }
 });
 
 app.whenReady().then(() => {
+  logLaunch(`app.whenReady fired (packaged=${app.isPackaged}, version=${app.getVersion()})`);
   // First thing, before any backend work even starts -- see
   // createSplashWindow's comment for why.
   createSplashWindow();
