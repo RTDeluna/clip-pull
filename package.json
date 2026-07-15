@@ -1,6 +1,6 @@
 {
   "name": "clippull-video-downloader",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "Paste Vimeo links, download them in parallel with live progress bars.",
   "main": "main.js",
   "author": "Clip.Pull rtdeluna",
