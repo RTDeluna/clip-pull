@@ -52,19 +52,36 @@ let mainWindow = null;
 // for the latter.
 let isShuttingDown = false;
 
+// package.json's asarUnpack ("backend/dist/**", "backend/vendor/**") makes
+// electron-builder physically extract these files into a sibling
+// "app.asar.unpacked" folder instead of leaving them packed inside app.asar
+// -- but __dirname still resolves to the *packed* ".../resources/app.asar"
+// path either way. Electron's asar integration transparently redirects
+// plain file reads (fs.existsSync, fs.readFileSync, ...) against an
+// asar-internal path to the real unpacked file, which is exactly why this
+// bug stayed hidden: every existence check kept saying the file was there.
+// child_process.spawn() gets no such redirection -- Windows' CreateProcess
+// has no concept of asar archives, so it can't execute a "file" that's
+// really just bytes concatenated inside a different file, and fails with
+// ENOENT. Any path that's going to be spawned/exec'd (unlike EXTENSION_DIR
+// below, which is only ever read from, never executed, and stays fine as
+// a plain __dirname-relative path) has to be resolved against the real
+// unpacked directory instead.
+function getAsarUnpackedDir() {
+  return app.isPackaged ? __dirname.replace("app.asar", "app.asar.unpacked") : __dirname;
+}
+
 // The backend is built with PyInstaller's --onedir (not --onefile): the exe
 // sits inside its own "clippull-backend" folder alongside its dependency
 // DLLs, rather than as a single self-extracting file. --onefile has to
 // unpack that entire payload to a fresh %TEMP% directory on every single
 // launch -- slow on its own, and exactly the "unpacks itself to disk at
 // runtime" behavior antivirus heuristics are quick to flag on an unsigned
-// exe, which is what previously caused the backend health-check in
-// waitForBackend() below to time out on some machines. --onedir removes the
-// re-extraction step entirely: the files just sit on disk from install time
-// onward, so startup is both faster and reads less suspicious.
+// exe. --onedir removes the re-extraction step entirely: the files just sit
+// on disk from install time onward.
 function getBackendExecutablePath() {
   const exeName = process.platform === "win32" ? "clippull-backend.exe" : "clippull-backend";
-  return path.join(__dirname, "backend", "dist", "clippull-backend", exeName);
+  return path.join(getAsarUnpackedDir(), "backend", "dist", "clippull-backend", exeName);
 }
 
 // Bundled at build time by scripts/fetch-ffmpeg.ps1 into backend/vendor/,
@@ -72,10 +89,14 @@ function getBackendExecutablePath() {
 // -- so this resolves consistently whether running from source or packaged.
 // Only non-null if the file is actually there: older installs built before
 // bundling was added, or a dev machine that never ran the fetch script,
-// fall back to check_ffmpeg_available()'s system-PATH lookup instead.
+// fall back to check_ffmpeg_available()'s system-PATH lookup instead. Must
+// use the real unpacked path too -- the backend goes on to spawn this path
+// itself (as ffmpeg_location) to actually run ffmpeg as a subprocess for
+// merging video+audio streams, same asar+spawn constraint as the backend
+// exe above.
 function getBundledFfmpegPath() {
   const exeName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
-  const ffmpegPath = path.join(__dirname, "backend", "vendor", exeName);
+  const ffmpegPath = path.join(getAsarUnpackedDir(), "backend", "vendor", exeName);
   return fs.existsSync(ffmpegPath) ? ffmpegPath : null;
 }
 
