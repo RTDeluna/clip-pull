@@ -24,6 +24,18 @@ const EXTENSION_DIR = path.join(__dirname, "assets", "extension");
 const BACKEND_PORT = 8934;
 const BACKEND_HEALTH_URL = `http://127.0.0.1:${BACKEND_PORT}/health`;
 
+// How many 300ms polls of BACKEND_HEALTH_URL to attempt before giving up and
+// showing the "having trouble starting" dialog (see waitForBackend). This
+// only bounds the worst case -- a successful launch never waits this long,
+// since waitForBackend returns the instant /health responds. A first-ever
+// launch gets a much longer budget: a fresh install's real-time antivirus
+// scan of a batch of freshly-written, unsigned files can plausibly take
+// longer than a normal 12s launch, where the files are already on disk and
+// most AV products cache a clean verdict per file hash+mtime instead of
+// re-scanning on every run.
+const NORMAL_RETRY_COUNT = 40; // 12s
+const FIRST_RUN_RETRY_COUNT = 100; // 30s
+
 // A fresh random secret every launch, required by the backend on every
 // request except /health (see backend/main.py's require_api_token). The
 // backend binds to 127.0.0.1, but that alone doesn't stop a webpage open in
@@ -40,15 +52,25 @@ let mainWindow = null;
 // for the latter.
 let isShuttingDown = false;
 
+// The backend is built with PyInstaller's --onedir (not --onefile): the exe
+// sits inside its own "clippull-backend" folder alongside its dependency
+// DLLs, rather than as a single self-extracting file. --onefile has to
+// unpack that entire payload to a fresh %TEMP% directory on every single
+// launch -- slow on its own, and exactly the "unpacks itself to disk at
+// runtime" behavior antivirus heuristics are quick to flag on an unsigned
+// exe, which is what previously caused the backend health-check in
+// waitForBackend() below to time out on some machines. --onedir removes the
+// re-extraction step entirely: the files just sit on disk from install time
+// onward, so startup is both faster and reads less suspicious.
 function getBackendExecutablePath() {
   const exeName = process.platform === "win32" ? "clippull-backend.exe" : "clippull-backend";
-  return path.join(__dirname, "backend", "dist", exeName);
+  return path.join(__dirname, "backend", "dist", "clippull-backend", exeName);
 }
 
 // Bundled at build time by scripts/fetch-ffmpeg.ps1 into backend/vendor/,
-// the same way clippull-backend.exe lands in backend/dist/ -- so this
-// resolves consistently whether running from source or packaged. Only
-// non-null if the file is actually there: older installs built before
+// the same way clippull-backend.exe lands in backend/dist/clippull-backend/
+// -- so this resolves consistently whether running from source or packaged.
+// Only non-null if the file is actually there: older installs built before
 // bundling was added, or a dev machine that never ran the fetch script,
 // fall back to check_ffmpeg_available()'s system-PATH lookup instead.
 function getBundledFfmpegPath() {
@@ -57,12 +79,19 @@ function getBundledFfmpegPath() {
   return fs.existsSync(ffmpegPath) ? ffmpegPath : null;
 }
 
+// The backend creates this file on its first successful start -- used as a
+// proxy for "is this a first-ever launch" (see FIRST_RUN_RETRY_COUNT above),
+// checked before spawnBackend() runs (which is what would create it).
+function getDbPath() {
+  return path.join(app.getPath("userData"), "clip_pull.db");
+}
+
 function spawnBackend() {
   isShuttingDown = false;
   const bundledFfmpeg = getBundledFfmpegPath();
   const ffmpegEnv = bundledFfmpeg ? { CLIP_PULL_FFMPEG_PATH: bundledFfmpeg } : {};
   if (app.isPackaged) {
-    const dbPath = path.join(app.getPath("userData"), "clip_pull.db");
+    const dbPath = getDbPath();
     backendProcess = spawn(getBackendExecutablePath(), [], {
       stdio: "inherit",
       env: { ...process.env, CLIP_PULL_DB_PATH: dbPath, CLIP_PULL_API_TOKEN: API_TOKEN, ...ffmpegEnv },
@@ -145,10 +174,45 @@ function waitForBackend(retriesLeft, onReady) {
     });
 }
 
+let splashWindow = null;
+
+// Shown the instant the app launches, before spawnBackend()/waitForBackend()
+// even start -- without this, nothing appears on screen at all for up to
+// FIRST_RUN_RETRY_COUNT * 300ms, which reads as a hang even when the app is
+// about to start up fine on its own. Purely decorative: no preload, no IPC,
+// no backend calls (see frontend/splash.js) -- it can't interact with the
+// main window's own startup sequence at all, just sits on top of it.
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 320,
+    height: 280,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    backgroundColor: "#0a0a10",
+    icon: path.join(__dirname, "assets", "icon.ico"),
+  });
+  splashWindow.loadFile(path.join(__dirname, "frontend", "splash.html"));
+}
+
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.close();
+  }
+  splashWindow = null;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 700,
+    // Starts hidden and is shown only once frontend/index.html has actually
+    // painted (see the ready-to-show handler below) -- otherwise Electron
+    // shows a blank window the instant it's constructed, before any content
+    // has loaded, which the splash window above is specifically here to
+    // avoid ever exposing to begin with.
+    show: false,
     icon: path.join(__dirname, "assets", "icon.ico"),
     backgroundColor: "#0a0a10",
     webPreferences: {
@@ -163,6 +227,10 @@ function createWindow() {
       // rather than relying on the header injection below.
       additionalArguments: [`--clip-pull-token=${API_TOKEN}`],
     },
+  });
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    closeSplashWindow();
   });
   mainWindow.loadFile(path.join(__dirname, "frontend", "index.html"));
 }
@@ -531,6 +599,9 @@ ipcMain.handle("save-text-file", async (_, { content, defaultFilename, filters }
 });
 
 app.whenReady().then(() => {
+  // First thing, before any backend work even starts -- see
+  // createSplashWindow's comment for why.
+  createSplashWindow();
   Menu.setApplicationMenu(null);
   // Transparently attaches the auth token to every request the renderer's
   // fetch() calls send to the backend, so frontend/*.js never needs to know
@@ -545,13 +616,13 @@ app.whenReady().then(() => {
       callback({ requestHeaders: details.requestHeaders });
     }
   );
+  // Checked before spawnBackend() runs, since that's what creates this file
+  // -- see FIRST_RUN_RETRY_COUNT's comment for why a first-ever launch gets
+  // a longer budget before falling back to the "having trouble starting"
+  // dialog.
+  const isFirstRun = app.isPackaged && !fs.existsSync(getDbPath());
   spawnBackend();
-  // The packaged backend is a PyInstaller onefile executable, which
-  // self-extracts to a temp directory on every launch — on first run,
-  // with antivirus scanning an unsigned exe, this can take much longer
-  // than a dev-mode `python main.py` start. 40 retries at 300ms gives it
-  // 12s before falling back, instead of the previous 6s.
-  waitForBackend(40, createWindow);
+  waitForBackend(isFirstRun ? FIRST_RUN_RETRY_COUNT : NORMAL_RETRY_COUNT, createWindow);
 });
 
 // Defense-in-depth, not a fix for anything reachable today: the app never

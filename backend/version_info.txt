@@ -1,0 +1,52 @@
+# UTF-8
+#
+# PyInstaller version-file resource for clippull-backend.exe. Despite the
+# .txt extension this is Python-literal syntax (VSVersionInfo(...)), which
+# PyInstaller's --version-file flag (see package.json's build:backend
+# script) compiles into the exe's PE version resource -- visible via right-
+# click -> Properties -> Details in Windows Explorer.
+#
+# An unsigned exe with NO version resource at all (no CompanyName/
+# FileDescription/ProductName) reads as more suspicious to both AV
+# heuristics and a human reviewer than one that looks like normal,
+# above-board commercial software. This doesn't replace real code signing
+# (see main.js's comment on getBackendExecutablePath for the full picture),
+# but it's a free, zero-certificate-required improvement worth having
+# regardless.
+#
+# NOTE: FileVersion/ProductVersion below are NOT auto-synced with
+# package.json's "version" field -- update this by hand to match before
+# cutting a release (see the reminder comment near the version bump in
+# scripts/release.ps1).
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 3, 1, 0),
+    prodvers=(1, 3, 1, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u"040904B0",
+          [
+            StringStruct(u"CompanyName", u"CLIP.PULL"),
+            StringStruct(u"FileDescription", u"CLIP.PULL download engine"),
+            StringStruct(u"FileVersion", u"1.3.1.0"),
+            StringStruct(u"InternalName", u"clippull-backend"),
+            StringStruct(u"LegalCopyright", u"\xa9 CLIP.PULL. All rights reserved."),
+            StringStruct(u"OriginalFilename", u"clippull-backend.exe"),
+            StringStruct(u"ProductName", u"CLIP.PULL"),
+            StringStruct(u"ProductVersion", u"1.3.1.0"),
+          ],
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct(u"Translation", [1033, 1200])]),
+  ],
+)

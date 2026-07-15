@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Same strict, self-only policy as index.html — this window never loads
+       remote content and never talks to the backend (it's purely decorative
+       while the backend starts up), so connect-src is 'none' here instead of
+       allowing the loopback backend like index.html does. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' file: data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none';" />
+  <title>Starting CLIP.PULL…</title>
+  <link rel="stylesheet" href="splash.css" />
+</head>
+<body>
+  <img src="../assets/icon.png" alt="" class="splash__logo" />
+  <div class="splash__spinner" aria-hidden="true"></div>
+  <p id="splash-message" class="splash__message">Starting CLIP.PULL…</p>
+  <script type="module" src="splash.js"></script>
+</body>
+</html>

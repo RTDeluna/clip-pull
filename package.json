@@ -6,7 +6,7 @@
   "author": "Clip.Pull rtdeluna",
   "scripts": {
     "start": "electron .",
-    "build:backend": "cd backend && python -m PyInstaller --onefile --name clippull-backend --distpath dist --workpath build --specpath . main.py",
+    "build:backend": "cd backend && python -m PyInstaller --onedir --noupx --name clippull-backend --distpath dist --workpath build --specpath . --version-file version_info.txt main.py",
     "build:extension": "powershell -ExecutionPolicy Bypass -File scripts/build-extension.ps1",
     "fetch:ffmpeg": "powershell -ExecutionPolicy Bypass -File scripts/fetch-ffmpeg.ps1",
     "dist": "npm run fetch:ffmpeg && npm run build:backend && npm run build:extension && electron-builder",
@@ -33,7 +33,7 @@
       "package.json",
       "frontend/**/*",
       "assets/**/*",
-      "backend/dist/clippull-backend*",
+      "backend/dist/clippull-backend/**/*",
       "backend/vendor/ffmpeg*",
       "backend/vendor/FFMPEG_LICENSE.txt"
     ],

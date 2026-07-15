@@ -50,6 +50,10 @@ if ((git rev-parse HEAD) -ne (git rev-parse origin/master)) {
 }
 
 # 2. Bump package.json, commit, and tag: atomic via npm.
+#    REMINDER: backend/version_info.txt's FileVersion/ProductVersion aren't
+#    auto-synced with package.json's version (PyInstaller's --version-file
+#    resource, baked into clippull-backend.exe at build time in step 3 below)
+#    -- update it by hand to match $version before releasing, or it'll drift.
 Write-Host "Bumping version ($Bump)..." -ForegroundColor Cyan
 npm version $Bump -m "chore: release v%s"
 if ($LASTEXITCODE -ne 0) { Fail "npm version failed." }

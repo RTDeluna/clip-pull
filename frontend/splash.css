@@ -1,0 +1,63 @@
+/* Standalone stylesheet, deliberately not styles.css -- this window is a
+   tiny, self-contained splash shown before the main app's backend is even
+   confirmed reachable, so it can't depend on anything the main UI does. */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  background: #0a0a10;
+  color: #f2f2f7;
+  font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.splash__logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+.splash__spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid rgba(255, 255, 255, 0.14);
+  border-top-color: #8b5cf6;
+  border-radius: 50%;
+  animation: splash-spin 800ms linear infinite;
+}
+
+@keyframes splash-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.splash__message {
+  margin: 0;
+  max-width: 260px;
+  text-align: center;
+  font-size: 13px;
+  color: #9b9bb3;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash__spinner {
+    animation: none;
+  }
+}
