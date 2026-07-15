@@ -390,3 +390,15 @@ function scheduleLiveRefresh() {
 connectQueueSocket((event) => {
   if (event.type === "usage_recorded") scheduleLiveRefresh();
 });
+
+// Settings dispatches this the instant a license is activated/deactivated
+// (see settings-view.js's renderLicense). Without listening for it, Insights
+// had no way to know Pro status changed -- the lock state here is entirely
+// driven by whether /usage/dashboard 402s, so it stayed on whatever it last
+// rendered until the user happened to hit Refresh, switch date ranges, or an
+// unrelated usage_recorded event fired. Matches history-view.js's own
+// clippull:license-changed listener for the same reason.
+document.addEventListener("clippull:license-changed", () => {
+  if (!hasLoadedOnce) return; // never opened yet -- first activation fetches the right state already
+  loadInsights();
+});

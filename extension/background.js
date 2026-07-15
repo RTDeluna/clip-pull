@@ -7,6 +7,19 @@
 
 const CLIPPULL_BASE = "http://127.0.0.1:8934";
 
+// The packaged desktop app's own PyInstaller backend can take several
+// seconds (sometimes longer on a first-ever launch, while antivirus scans
+// the new executable) to start listening -- main.js budgets up to 12s for a
+// normal launch and 30s for a genuine first run (see NORMAL_RETRY_COUNT /
+// FIRST_RUN_RETRY_COUNT there). A single 3s attempt with no retry, as this
+// used to be, reports "Clip.Pull isn't running" as a false negative for
+// exactly the common case of clicking the extension right after launching
+// the app. Retrying here for ~12s covers the normal-launch budget without
+// making the popup feel hung on the rarer first-run case (which still just
+// needs one more click of "Try Again" once the app finishes starting).
+const REACHABILITY_RETRY_COUNT = 12;
+const REACHABILITY_RETRY_DELAY_MS = 1000;
+
 function notify(id, title, message) {
   chrome.notifications.create(id, {
     type: "basic",
@@ -20,11 +33,31 @@ function notify(id, title, message) {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function getDefaultOutputFolder() {
   const res = await fetch(`${CLIPPULL_BASE}/settings`, { signal: AbortSignal.timeout(3000) });
   if (!res.ok) return null;
   const settings = await res.json();
   return settings.default_output_folder || null;
+}
+
+// Retries the reachability/settings check while Clip.Pull's backend is
+// still cold-starting, instead of failing on the first attempt (see
+// REACHABILITY_RETRY_COUNT's comment above). Only retries on a network-level
+// failure (connection refused/timeout -- nothing listening yet); a real HTTP
+// error response is returned as-is immediately, same as before.
+async function getDefaultOutputFolderWithRetry() {
+  for (let attempt = 1; attempt <= REACHABILITY_RETRY_COUNT; attempt++) {
+    try {
+      return await getDefaultOutputFolder();
+    } catch (err) {
+      if (attempt === REACHABILITY_RETRY_COUNT) throw err;
+      await sleep(REACHABILITY_RETRY_DELAY_MS);
+    }
+  }
 }
 
 async function sendToClipPull({ url, referer, subfolder }) {
@@ -36,7 +69,7 @@ async function sendToClipPull({ url, referer, subfolder }) {
   // before this request even started.
   let outputFolder;
   try {
-    outputFolder = await getDefaultOutputFolder();
+    outputFolder = await getDefaultOutputFolderWithRetry();
   } catch {
     return { ok: false, error: "not_running" };
   }
