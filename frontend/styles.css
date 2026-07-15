@@ -626,13 +626,74 @@ body::before {
 
 .license-key-row {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.license-key-row[hidden] {
+  display: none;
 }
 
 .license-key-row .btn {
   flex-shrink: 0;
   width: auto;
   margin-top: 0;
+}
+
+/* Windows-activation-style key reveal: once a key is on file it's shown
+   masked and read-only here instead of sitting in a re-editable input --
+   see settings-view.js's updateKeyPanelVisibility for why. */
+.license-key-display {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+  margin-bottom: 20px;
+}
+
+.license-key-display[hidden] {
+  display: none;
+}
+
+.license-key-display__icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--success);
+}
+
+.license-key-display[data-status="invalid"] .license-key-display__icon {
+  color: var(--error);
+}
+
+.license-key-display__value {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 1.5px;
+  color: var(--text);
+  user-select: none;
+}
+
+.license-change-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.license-change-btn:hover {
+  color: var(--accent-strong);
 }
 
 .license-actions {

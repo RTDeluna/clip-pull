@@ -305,4 +305,23 @@ if __name__ == "__main__":
         if license_store.get()["status"] == "active":
             track_task(asyncio.create_task(_revalidate_license(license_store)))
 
-    uvicorn.run(app, host="127.0.0.1", port=8934)
+    # main.js's exit handler already sees this process's exit code/signal,
+    # but not *why* -- a packaged Windows GUI app has no console, so without
+    # this, an unhandled exception here (or uvicorn failing to even bind)
+    # left nothing behind to diagnose beyond "it stopped." Logged through the
+    # existing `logger` so it lands in clippull.log alongside everything
+    # else that was happening right before the crash, then re-raised so the
+    # process still exits non-zero exactly as before -- this only adds a
+    # paper trail, it doesn't change the failure behavior itself.
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=8934)
+    except OSError:
+        logger.exception(
+            "uvicorn.run() failed to start -- port 8934 may already be in use "
+            "by another process (a stuck previous instance, or a second copy "
+            "of CLIP.PULL already running)."
+        )
+        raise
+    except Exception:
+        logger.exception("Backend crashed while running uvicorn.run().")
+        raise

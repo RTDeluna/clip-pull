@@ -305,9 +305,20 @@
         </div>
 
         <label class="field-label" for="setting-license-key">License key</label>
-        <div class="license-key-row">
+
+        <div id="license-key-display" class="license-key-display" data-status="none" hidden>
+          <svg class="license-key-display__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span id="license-key-display-text" class="license-key-display__value">•••• •••• •••• XXXX</span>
+          <button id="license-change-btn" class="license-change-btn" type="button" hidden>Change key</button>
+        </div>
+
+        <div id="license-key-entry" class="license-key-row">
           <input id="setting-license-key" class="text-input" type="text" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX" />
           <button id="license-activate-btn" class="btn btn--ghost" type="button">Activate</button>
+          <button id="license-cancel-btn" class="license-change-btn" type="button" hidden>Cancel</button>
         </div>
 
         <div class="license-actions">

@@ -19,6 +19,31 @@ app.disableHardwareAcceleration();
 // shortcut's AppUserModelID.
 app.setAppUserModelId("com.clippull.downloader");
 
+// Without a single-instance lock, double-clicking the installed shortcut
+// twice (or a leftover process from a previous crash that never fully
+// exited) spawns a second Electron process that tries to start its own
+// backend on the same fixed port (8934). uvicorn can't bind twice to the
+// same port, so that second backend dies almost immediately with EADDRINUSE
+// -- which looks exactly like "CLIP.PULL backend stopped" from the user's
+// side, even though a perfectly healthy first instance is still running
+// (possibly just not focused/visible). A bare top-level `return` here is
+// legal: Electron requires this file as a normal CommonJS module, which
+// Node wraps in a function -- so this aborts the rest of main.js entirely
+// (no second spawnBackend/whenReady) for the losing instance.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  return;
+}
+app.on("second-instance", () => {
+  // Someone tried to launch a second copy -- bring the real one forward
+  // instead of silently doing nothing, so it doesn't look like the double-
+  // click had no effect.
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 const EXTENSION_DIR = path.join(__dirname, "assets", "extension");
 
 const BACKEND_PORT = 8934;
@@ -129,6 +154,28 @@ function logLaunch(message) {
   }
 }
 
+// A packaged Windows GUI app has no console for a spawned child's stdio to
+// attach to, so "inherit" (used below in dev mode, where a real terminal IS
+// attached) silently discards everything the backend ever prints -- most
+// importantly, the full Python traceback a real crash would otherwise print
+// to stderr. That gap is exactly why previous crash reports had nothing to
+// diagnose beyond an exit code. This captures both streams to a plain file
+// instead, so the next crash leaves an actual traceback behind.
+function getBackendOutputLogPath() {
+  return path.join(app.getPath("userData"), "backend-output.log");
+}
+
+// How many times spawnBackend() will silently respawn the backend after an
+// unexpected mid-session exit before giving up and showing the user-facing
+// dialog -- covers a transient hiccup (e.g. a slow antivirus scan on the
+// exe finishing mid-request and momentarily interrupting it) without
+// declaring the whole session dead over something that recovers on its own.
+// Reset to 0 the moment a respawned backend actually answers /health again,
+// so this is "2 retries per incident," not "2 retries ever."
+const BACKEND_MAX_AUTO_RESTARTS = 2;
+const BACKEND_AUTO_RESTART_DELAY_MS = 1000;
+let backendAutoRestarts = 0;
+
 function spawnBackend() {
   isShuttingDown = false;
   const bundledFfmpeg = getBundledFfmpegPath();
@@ -141,11 +188,29 @@ function spawnBackend() {
     // the backend's files, this is false and everything downstream is
     // explained in one line instead of being a mystery.
     logLaunch(`spawnBackend: exe=${backendExe} exists=${fs.existsSync(backendExe)}`);
+    let outputLogStream = null;
+    try {
+      // Append, not truncate: a crash-then-auto-restart-then-crash-again
+      // sequence needs to stay in one file to be readable as a sequence.
+      // app.whenReady() truncates this once per app launch instead (see
+      // there), so it doesn't grow unbounded across the app's lifetime.
+      outputLogStream = fs.createWriteStream(getBackendOutputLogPath(), { flags: "a" });
+    } catch (err) {
+      logLaunch(`spawnBackend: couldn't open backend-output.log: ${err.message}`);
+    }
     backendProcess = spawn(backendExe, [], {
-      stdio: "inherit",
+      stdio: outputLogStream ? ["ignore", "pipe", "pipe"] : "inherit",
       env: { ...process.env, CLIP_PULL_DB_PATH: dbPath, CLIP_PULL_API_TOKEN: API_TOKEN, ...ffmpegEnv },
       windowsHide: true,
     });
+    if (outputLogStream) {
+      // { end: false }: multiple restarts within one launch each pipe into
+      // the same stream instance, so the *stream* shouldn't auto-close when
+      // one child's stdout happens to end -- only when the whole process
+      // (or the next restart's new stream) does.
+      backendProcess.stdout.pipe(outputLogStream, { end: false });
+      backendProcess.stderr.pipe(outputLogStream, { end: false });
+    }
   } else {
     logLaunch("spawnBackend: dev mode (python main.py)");
     backendProcess = spawn("python", ["main.py"], {
@@ -169,11 +234,30 @@ function spawnBackend() {
     if (isShuttingDown) return;
     console.error(`Backend exited unexpectedly (code=${code}, signal=${signal}).`);
     logLaunch(`backendProcess exited unexpectedly: code=${code} signal=${signal}`);
+    if (backendAutoRestarts < BACKEND_MAX_AUTO_RESTARTS) {
+      backendAutoRestarts += 1;
+      logLaunch(`backendProcess: auto-restarting (attempt ${backendAutoRestarts}/${BACKEND_MAX_AUTO_RESTARTS})`);
+      setTimeout(() => {
+        spawnBackend();
+        // A plain health poll, not the startup waitForBackend(..., createWindow)
+        // call -- the window already exists from the original launch, so the
+        // only thing a successful restart needs to do is clear the counter
+        // above. If this poll itself times out, its own "having trouble
+        // starting" dialog fires, which is an acceptable (if imperfectly
+        // worded) fallback for an already-rare double-failure.
+        waitForBackend(NORMAL_RETRY_COUNT, () => {
+          backendAutoRestarts = 0;
+          logLaunch("backendProcess: auto-restart succeeded, backend answered /health again");
+        });
+      }, BACKEND_AUTO_RESTART_DELAY_MS);
+      return;
+    }
     dialog.showErrorBox(
       "CLIP.PULL backend stopped",
-      "The download engine stopped unexpectedly and can't continue this " +
-        "session. Please restart CLIP.PULL. If this keeps happening, check " +
-        "that no antivirus software is blocking the app."
+      "The download engine stopped unexpectedly and couldn't be restarted " +
+        "automatically. Please restart CLIP.PULL. If this keeps happening, " +
+        "check that no antivirus software is blocking the app -- a log was " +
+        `saved to:\n${getBackendOutputLogPath()}`
     );
   });
 }
@@ -687,8 +771,24 @@ app.whenReady().then(() => {
   // a longer budget before falling back to the "having trouble starting"
   // dialog.
   const isFirstRun = app.isPackaged && !fs.existsSync(getDbPath());
+  // Truncated once per app launch (not per backend restart -- spawnBackend
+  // itself always appends, see getBackendOutputLogPath's comment) so this
+  // doesn't grow forever across a long-lived install, while still keeping a
+  // full crash-then-restart-then-crash sequence together within one launch.
+  // Dev mode never writes this file at all (stdio stays "inherit" there, a
+  // real terminal is already attached), so there's nothing to truncate.
+  if (app.isPackaged) {
+    try {
+      fs.writeFileSync(getBackendOutputLogPath(), "");
+    } catch {
+      // Best-effort, same as logLaunch -- userData may not be writable yet.
+    }
+  }
   spawnBackend();
-  waitForBackend(isFirstRun ? FIRST_RUN_RETRY_COUNT : NORMAL_RETRY_COUNT, createWindow);
+  waitForBackend(isFirstRun ? FIRST_RUN_RETRY_COUNT : NORMAL_RETRY_COUNT, () => {
+    backendAutoRestarts = 0;
+    createWindow();
+  });
 });
 
 // Defense-in-depth, not a fix for anything reachable today: the app never

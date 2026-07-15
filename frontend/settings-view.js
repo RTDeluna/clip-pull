@@ -43,6 +43,11 @@ const licenseKeyInput = document.getElementById("setting-license-key");
 const licenseActivateBtn = document.getElementById("license-activate-btn");
 const licenseDeactivateBtn = document.getElementById("license-deactivate-btn");
 const licenseUpgradeBtn = document.getElementById("license-upgrade-btn");
+const licenseKeyDisplay = document.getElementById("license-key-display");
+const licenseKeyDisplayText = document.getElementById("license-key-display-text");
+const licenseKeyEntry = document.getElementById("license-key-entry");
+const licenseChangeBtn = document.getElementById("license-change-btn");
+const licenseCancelBtn = document.getElementById("license-cancel-btn");
 // Kept in sync with main.js's ALLOWED_EXTERNAL_URLS allow-list (the backend
 // half of this feature adds the matching entry there).
 const GUMROAD_PRO_URL = "https://gumroad.com/l/clippull-pro-placeholder";
@@ -362,12 +367,39 @@ saveBtn.addEventListener("click", async () => {
   }
 });
 
-// The license key itself is write-only conceptually (GET /license never
-// returns it), so this only reflects status — it never prefills the input.
+// The raw license key itself is write-only conceptually (GET /license never
+// returns it, only its last 4 chars) -- this never prefills the input with
+// anything sensitive. Once a key is on file, though, we still owe the user
+// a visible confirmation of *which* key is connected, so it isn't silently
+// invisible either.
+//
+// The reveal/edit split below follows the Windows activation model: once
+// activated, Windows shows a masked product key as static text with a
+// separate "Change product key" action -- it never puts the current key
+// back into an editable field you could accidentally overwrite by typing.
+// `showingKeyEntry` is the deliberate override for that "Change key" path;
+// it's the only way the editable input reappears once a key exists.
+let lastLicenseEntry = null;
+let showingKeyEntry = false;
+
+function updateKeyPanelVisibility() {
+  const hasStoredKey = Boolean(lastLicenseEntry?.license_key_last4);
+  const showDisplay = hasStoredKey && !showingKeyEntry;
+  licenseKeyDisplay.hidden = !showDisplay;
+  licenseKeyEntry.hidden = showDisplay;
+  licenseChangeBtn.hidden = !hasStoredKey || showingKeyEntry;
+  licenseCancelBtn.hidden = !hasStoredKey || !showingKeyEntry;
+  if (showDisplay) {
+    licenseKeyDisplayText.textContent = `•••• •••• •••• ${lastLicenseEntry.license_key_last4.toUpperCase()}`;
+  }
+}
+
 function renderLicense(entry) {
+  lastLicenseEntry = entry;
   const status = entry?.status ?? "none";
   isPro = Boolean(entry?.pro);
   licenseStatusEl.dataset.status = status;
+  licenseKeyDisplay.dataset.status = status;
   if (isPro) {
     licenseStatusText.textContent = entry.purchase_email
       ? `Pro — activated (${entry.purchase_email})`
@@ -379,6 +411,7 @@ function renderLicense(entry) {
   }
   licenseDeactivateBtn.hidden = !isPro;
   licenseUpgradeBtn.hidden = isPro;
+  updateKeyPanelVisibility();
   applyProGating();
   // History's own Pro gating (Lesson Notes, export, batch transcription) is
   // cached independently and only ever fetched once at that module's load --
@@ -406,10 +439,13 @@ async function loadLicense() {
   } catch (error) {
     console.warn("Couldn't load license status:", error);
     isPro = false;
+    lastLicenseEntry = null;
+    showingKeyEntry = false;
     licenseStatusEl.dataset.status = "none";
     licenseStatusText.textContent = "License status unavailable";
     licenseDeactivateBtn.hidden = true;
     licenseUpgradeBtn.hidden = false;
+    updateKeyPanelVisibility();
     applyProGating();
   }
 }
@@ -437,6 +473,7 @@ licenseActivateBtn.addEventListener("click", async () => {
     }
     const { entry } = await response.json();
     licenseKeyInput.value = "";
+    showingKeyEntry = false; // always collapse to the masked reveal on a successful (re)activation
     renderLicense(entry);
     showToast("CLIP.PULL Pro activated — thanks for your support!", "success");
   } catch (error) {
@@ -460,6 +497,7 @@ licenseDeactivateBtn.addEventListener("click", async () => {
       return;
     }
     const { entry } = await response.json();
+    showingKeyEntry = false;
     renderLicense(entry);
     showToast("License deactivated.", "info");
   } catch (error) {
@@ -472,6 +510,23 @@ licenseDeactivateBtn.addEventListener("click", async () => {
 
 licenseUpgradeBtn.addEventListener("click", () => {
   window.api.openExternal(GUMROAD_PRO_URL);
+});
+
+// "Change key" mirrors Windows' "Change product key" action: it opens a
+// fresh, empty entry field rather than making the masked display itself
+// editable. The currently-connected key stays active until a new one is
+// actually submitted via Activate below.
+licenseChangeBtn.addEventListener("click", () => {
+  licenseKeyInput.value = "";
+  showingKeyEntry = true;
+  updateKeyPanelVisibility();
+  licenseKeyInput.focus();
+});
+
+licenseCancelBtn.addEventListener("click", () => {
+  licenseKeyInput.value = "";
+  showingKeyEntry = false;
+  updateKeyPanelVisibility();
 });
 
 loadSettings();
